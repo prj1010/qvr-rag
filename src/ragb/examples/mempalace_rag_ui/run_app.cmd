@@ -1,9 +1,9 @@
 @echo off
 setlocal
 
-set "REPO_ROOT=%~dp0..\.."
-for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
-set "PY=%REPO_ROOT%\.venv\Scripts\python.exe"
+set "PROJECT_ROOT=%~dp0..\..\..\.."
+for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
+set "PY=%PROJECT_ROOT%\.venv\Scripts\python.exe"
 
 if not exist "%PY%" (
     echo Could not find the project virtual environment. Run setup.cmd first.

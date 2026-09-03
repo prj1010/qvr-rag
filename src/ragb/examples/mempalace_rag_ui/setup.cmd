@@ -1,9 +1,10 @@
 @echo off
 setlocal
 
-set "REPO_ROOT=%~dp0..\.."
-for %%I in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fI"
-set "PY=%REPO_ROOT%\.venv\Scripts\python.exe"
+set "PROJECT_ROOT=%~dp0..\..\..\.."
+for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
+set "SOURCE_ROOT=%PROJECT_ROOT%\src\ragb"
+set "PY=%PROJECT_ROOT%\.venv\Scripts\python.exe"
 
 where uv >nul 2>nul
 if errorlevel 1 (
@@ -13,11 +14,19 @@ if errorlevel 1 (
 
 if not exist "%PY%" (
     echo Creating the project virtual environment with uv...
-    uv venv "%REPO_ROOT%\.venv" --python 3.13
+    uv venv "%PROJECT_ROOT%\.venv" --python 3.13
     if errorlevel 1 exit /b 1
 )
 
-set "LOCAL_BASE=%REPO_ROOT%\..\..\examples\mempalace_quivr"
+for /f "tokens=2" %%V in ('"%PY%" --version 2^>nul') do set "PY_VERSION=%%V"
+if not "%PY_VERSION:~0,4%"=="3.13" (
+    echo This project requires Python 3.13. Found Python %PY_VERSION%.
+    echo Remove the existing .venv and run setup.cmd again:
+    echo rmdir /s /q "%PROJECT_ROOT%\.venv"
+    exit /b 1
+)
+
+set "LOCAL_BASE=%PROJECT_ROOT%\examples\mempalace_quivr"
 if exist "%LOCAL_BASE%\pyproject.toml" (
     echo Installing the local MemPalace package...
     uv pip install --python "%PY%" --upgrade -e "%LOCAL_BASE%[nvidia]"
@@ -33,7 +42,7 @@ uv pip install --python "%PY%" --upgrade "langchain-groq>=0.3.5,<1" "langchain-n
 if errorlevel 1 exit /b 1
 
 echo Installing the local Quivr Core fork...
-uv pip install --python "%PY%" --upgrade -e "%REPO_ROOT%\core"
+uv pip install --python "%PY%" --upgrade -e "%SOURCE_ROOT%\core"
 if errorlevel 1 exit /b 1
 
 echo Installing the React API server...
