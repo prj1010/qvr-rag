@@ -56,7 +56,7 @@ uv pip install --python "%PY%" --upgrade "fastapi>=0.115,<1" "python-multipart>=
 if errorlevel 1 exit /b 1
 
 echo Installing local document parsing and TTS dependencies...
-uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "pillow>=10,<13" "pymupdf>=1.24,<2" "pymupdf4llm>=1,<2" "rapidocr-onnxruntime>=1.3,<2" "python-docx>=1.1,<2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
+uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "pillow>=10,<13" "pymupdf>=1.24,<2" "pymupdf4llm>=1,<2" "rapidocr-onnxruntime>=1.2.3,<2" "python-docx>=1.1,<2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
 if errorlevel 1 exit /b 1
 
 echo Applying compatible dependency pins...
