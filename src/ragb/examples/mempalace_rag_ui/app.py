@@ -9,6 +9,7 @@ import io
 import os
 import shutil
 import tempfile
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +51,7 @@ class AppState:
 
 STATE = AppState()
 KOKORO_INIT_LOCK = Lock()
+KOKORO_SYNTHESIS_SEMAPHORE = asyncio.Semaphore(1)
 
 # Ensure Kokoro models exist, downloading them on the first TTS request.
 # Kokoro-ONNX 0.6.x uses the v1.0 model and a NumPy voices archive. Keep the
@@ -59,39 +61,56 @@ DEFAULT_MODELS_DIR = APP_DIR / "models" if os.name == "nt" else Path("/tmp/kokor
 MODELS_DIR = Path(
     os.getenv("KOKORO_MODELS_DIR", str(DEFAULT_MODELS_DIR))
 ).expanduser()
-ONNX_URL = (
+DEFAULT_ONNX_URL = (
     "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
     "model-files-v1.0/kokoro-v1.0.onnx"
 )
-VOICES_URL = (
+DEFAULT_VOICES_URL = (
     "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
     "model-files-v1.0/voices-v1.0.bin"
 )
-MODEL_FILENAME = "kokoro-v1.0.onnx"
-VOICES_FILENAME = "voices-v1.0.bin"
+ONNX_URL = os.getenv("KOKORO_MODEL_URL", DEFAULT_ONNX_URL)
+VOICES_URL = os.getenv("KOKORO_VOICES_URL", DEFAULT_VOICES_URL)
+MODEL_FILENAME = os.getenv("KOKORO_MODEL_FILENAME", "kokoro-v1.0.onnx")
+VOICES_FILENAME = os.getenv("KOKORO_VOICES_FILENAME", "voices-v1.0.bin")
 
 
 def _download_kokoro_asset(url: str, destination: Path) -> None:
     """Download a Kokoro asset atomically so interrupted downloads are ignored."""
 
     temporary_path = destination.with_name(f"{destination.name}.download")
-    print(f"Downloading Kokoro asset to {destination}...")
-    try:
-        with urllib.request.urlopen(url, timeout=120) as response, temporary_path.open(
-            "wb"
-        ) as output:
-            shutil.copyfileobj(response, output, length=1024 * 1024)
-        temporary_path.replace(destination)
-    except Exception as exc:
-        temporary_path.unlink(missing_ok=True)
-        raise RuntimeError(f"Could not download Kokoro asset from {url}: {exc}") from exc
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "quivr-mempalace-rag/0.2"},
+    )
+    last_error: Exception | None = None
+    for attempt in range(3):
+        print(f"Downloading Kokoro asset to {destination} (attempt {attempt + 1}/3)...")
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response, temporary_path.open(
+                "wb"
+            ) as output:
+                shutil.copyfileobj(response, output, length=1024 * 1024)
+            temporary_path.replace(destination)
+            return
+        except Exception as exc:
+            last_error = exc
+            temporary_path.unlink(missing_ok=True)
+            if attempt < 2:
+                time.sleep(2**attempt)
+
+    raise RuntimeError(f"Could not download Kokoro asset from {url}: {last_error}") from last_error
 
 
 def _ensure_kokoro_models() -> tuple[Path, Path]:
-    global MODELS_DIR
+    global MODEL_FILENAME, MODELS_DIR, ONNX_URL, VOICES_FILENAME, VOICES_URL
     MODELS_DIR = Path(
         os.getenv("KOKORO_MODELS_DIR", str(DEFAULT_MODELS_DIR))
     ).expanduser()
+    ONNX_URL = os.getenv("KOKORO_MODEL_URL", DEFAULT_ONNX_URL)
+    VOICES_URL = os.getenv("KOKORO_VOICES_URL", DEFAULT_VOICES_URL)
+    MODEL_FILENAME = os.getenv("KOKORO_MODEL_FILENAME", "kokoro-v1.0.onnx")
+    VOICES_FILENAME = os.getenv("KOKORO_VOICES_FILENAME", "voices-v1.0.bin")
     MODELS_DIR.mkdir(exist_ok=True, parents=True)
     onnx_path = MODELS_DIR / MODEL_FILENAME
     voices_path = MODELS_DIR / VOICES_FILENAME
@@ -696,8 +715,8 @@ async def api_answer_question(request: AskRequest) -> dict[str, Any]:
     }
 
 class TTSRequest(BaseModel):
-    text: str
-    voice: str = "af_bella"
+    text: str = Field(min_length=1, max_length=5000)
+    voice: str = Field(default="af_bella", min_length=1, max_length=64)
 
 @app.post("/api/tts")
 async def api_tts(request: TTSRequest):
@@ -708,17 +727,18 @@ async def api_tts(request: TTSRequest):
     try:
         import soundfile as sf
 
-        kokoro = await run_in_threadpool(get_kokoro)
+        async with KOKORO_SYNTHESIS_SEMAPHORE:
+            kokoro = await run_in_threadpool(get_kokoro)
 
-        # Generate the audio samples
-        samples, sample_rate = await run_in_threadpool(
-            kokoro.create,
-            request.text,
-            voice=request.voice,
-            speed=1.0,
-            lang="en-us",
-        )
-        
+            # Generate the audio samples
+            samples, sample_rate = await run_in_threadpool(
+                kokoro.create,
+                request.text,
+                voice=request.voice,
+                speed=1.0,
+                lang="en-us",
+            )
+
         # Write to in-memory buffer
         buffer = io.BytesIO()
         sf.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")

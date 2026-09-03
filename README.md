@@ -267,6 +267,19 @@ The FastAPI application is compatible with a Databricks Apps deployment model:
 - Replace local FAISS and filesystem persistence with durable storage.
 - Move OCR to a Linux-compatible service or pre-ingestion job.
 
+## Render deployment
+
+The root `render.yaml` is configured for a native Python web service. It pins
+Python 3.13, installs the bundled Quivr Core and MemPalace packages, builds
+the React frontend, pre-caches the smaller Kokoro int8 model, and exposes
+`/api/health` for Render HTTP health checks.
+
+Set `GROQ_API_KEY` and/or `NVIDIA_API_KEY` in the Render dashboard before
+deploying. The current app is suitable for a demo or pilot, not a fully
+production-grade multi-user service: the indexed Brain is process-local,
+`/tmp` storage is ephemeral, authentication and rate limiting are not yet
+implemented, and the free Render plan has limited CPU/RAM and may spin down.
+
 ## Security
 
 Do not commit:
