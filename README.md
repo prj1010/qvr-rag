@@ -214,12 +214,28 @@ Use Python 3.13, recreate `.venv`, and repeat the installation.
 
 ### React frontend is missing
 
+You are running npm from the wrong directory. The root folder has no `frontend` folder, and `aicctv-databricks-app` is a different project.
+
+Copy these commands exactly:
+
 ```cmd
-cd /d src\ragb\examples\mempalace_rag_ui\frontend
+cd /d C:\Users\GauravSarma\Downloads\ragb-0.2.0\src\ragb\examples\mempalace_rag_ui\frontend
 npm install
 npm run build
 ```
 
+The build output should begin with:
+
+```text
+quivr-mempalace-rag-ui@0.2.0 build
+```
+
+Then start the backend:
+
+```cmd
+cd /d C:\Users\GauravSarma\Downloads\ragb-0.2.0\src\ragb\examples\mempalace_rag_ui
+run_app.cmd
+```
 ### OCR is unavailable
 
 ```cmd
