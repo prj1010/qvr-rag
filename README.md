@@ -275,10 +275,49 @@ the React frontend, pre-caches the smaller Kokoro int8 model, and exposes
 `/api/health` for Render HTTP health checks.
 
 Set `GROQ_API_KEY` and/or `NVIDIA_API_KEY` in the Render dashboard before
-deploying. The current app is suitable for a demo or pilot, not a fully
-production-grade multi-user service: the indexed Brain is process-local,
-`/tmp` storage is ephemeral, authentication and rate limiting are not yet
-implemented, and the free Render plan has limited CPU/RAM and may spin down.
+deploying. Add the admin and tracing variables described below if the admin
+console is needed. The indexed Brain is still process-local, `/tmp` storage is
+ephemeral, and the free Render plan has limited CPU/RAM and may spin down; use
+durable storage, a worker queue, rate limiting, and a paid multi-instance plan
+before treating this as a high-volume production service.
+
+## Admin observability and tracing
+
+The second area of the web app is an admin-only observability console. It records
+safe metadata for `rag.index`, `memory.recall`, `rag.ask`, and `tts.synthesis`,
+including nested retrieval, embedding, generation, and TTS spans. Prompt,
+answer, and document content are not captured by default.
+
+Tracing uses [Langfuse](https://langfuse.com/), an open-source/self-hostable
+platform included in the [awesome-agent-observability catalog](https://github.com/anhermon/awesome-agent-observability).
+Without Langfuse credentials, the console still provides a bounded local trace
+buffer for the current process.
+
+### Microsoft SSO setup
+
+1. In Microsoft Entra ID, create an App Registration and add a **Web** redirect
+   URI: `https://YOUR-RENDER-SERVICE.onrender.com/admin/callback`.
+2. Create a client secret and copy its value immediately.
+3. Set these Render environment variables:
+
+   ```text
+   MICROSOFT_TENANT_ID=<your tenant GUID or tenant domain>
+   MICROSOFT_CLIENT_ID=<application/client ID>
+   MICROSOFT_CLIENT_SECRET=<client secret value>
+   SESSION_SECRET=<long random value>
+   ADMIN_EMAILS=admin@yourcompany.com,another-admin@yourcompany.com
+   COOKIE_SECURE=true
+   ```
+
+   `ADMIN_EMAILS` is an explicit allowlist. Authentication alone does not grant
+   access to the admin console.
+4. Set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` if
+   traces should be exported to Langfuse. Keep
+   `OBSERVABILITY_CAPTURE_CONTENT=false` unless trace content has been reviewed
+   for privacy and compliance.
+5. Deploy, then select **Admin observability** in the app header. Unauthenticated
+   users are sent through Microsoft sign-in before `/api/admin/observability`
+   can return any trace data.
 
 ## Security
 
@@ -299,7 +338,7 @@ deployment credentials.
 
 - Persistent Databricks Vector Search integration
 - Unity Catalog-backed memory storage
-- Authentication and multi-user isolation
+- Multi-user isolation and durable session-backed state
 - Streaming responses
 - Background document indexing jobs
 - Production OCR service integration

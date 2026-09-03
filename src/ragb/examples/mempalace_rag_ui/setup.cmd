@@ -52,7 +52,7 @@ if exist "%QUIVR_CORE_PATH%\pyproject.toml" (
 if errorlevel 1 exit /b 1
 
 echo Installing the React API server...
-uv pip install --python "%PY%" --upgrade "fastapi>=0.115,<1" "python-multipart>=0.0.20,<1" "uvicorn[standard]>=0.34,<1"
+uv pip install --python "%PY%" --upgrade "fastapi>=0.115,<1" "python-multipart>=0.0.20,<1" "uvicorn[standard]>=0.34,<1" "authlib>=1.3,<2" "itsdangerous>=2.2,<3" "langfuse>=2.57,<3"
 if errorlevel 1 exit /b 1
 
 echo Installing local document parsing and TTS dependencies...

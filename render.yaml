@@ -36,6 +36,26 @@ services:
         sync: false          # Set this in the Render dashboard — never commit it
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+      - key: OBSERVABILITY_CAPTURE_CONTENT
+        value: "false"
       - key: NVIDIA_API_KEY
         sync: false          # Optional — only needed if using NVIDIA NIM
       - key: NVIDIA_MODEL

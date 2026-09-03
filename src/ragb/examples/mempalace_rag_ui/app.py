@@ -17,8 +17,8 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.documents import Document
 from langchain_groq import ChatGroq
@@ -28,6 +28,8 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 import uvicorn
 
+from admin_auth import ADMIN_AUTH
+from observability import OBSERVABILITY, content_metadata
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
@@ -449,15 +451,25 @@ def index_documents(
 
     try:
         llm = _build_llm(provider, model_name)
-        chunks = _load_local_documents(file_paths)
-        brain = asyncio.run(
-            Brain.afrom_langchain_documents(
-                name=brain_name.strip() or "mempalace-quivr",
-                langchain_documents=chunks,
-                llm=llm,
-                embedder=_build_embedder(),
+        with OBSERVABILITY.span(
+            "documents.parse",
+            "retriever",
+            {"file_count": len(file_paths)},
+        ):
+            chunks = _load_local_documents(file_paths)
+        with OBSERVABILITY.span(
+            "embeddings.index",
+            "embedding",
+            {"chunk_count": len(chunks), "provider": provider},
+        ):
+            brain = asyncio.run(
+                Brain.afrom_langchain_documents(
+                    name=brain_name.strip() or "mempalace-quivr",
+                    langchain_documents=chunks,
+                    llm=llm,
+                    embedder=_build_embedder(),
+                )
             )
-        )
         return brain, (
             f"Indexed {len(file_paths)} document(s) into {len(chunks)} local chunks "
             "with Quivr RAG."
@@ -518,13 +530,18 @@ def recall_memories(
             palace_path=palace_path.strip() or DEFAULT_PALACE,
             wing=wing.strip(),
         )
-        return _format_memories(
-            store.search(
-                question,
-                wing=wing.strip(),
-                n_results=int(n_results),
+        with OBSERVABILITY.span(
+            "memory.search",
+            "retriever",
+            {"wing": wing.strip(), "n_results": int(n_results)},
+        ):
+            return _format_memories(
+                store.search(
+                    question,
+                    wing=wing.strip(),
+                    n_results=int(n_results),
+                )
             )
-        )
     except Exception as exc:
         return f"Memory retrieval error: {type(exc).__name__}: {exc}"
 
@@ -556,8 +573,18 @@ def answer_question(
             wing=wing.strip(),
             n_results=int(n_results),
         )
-        memory_context = assistant.build_context(question)
-        answer = assistant.ask(question)
+        with OBSERVABILITY.span(
+            "memory.search",
+            "retriever",
+            {"wing": wing.strip(), "n_results": int(n_results)},
+        ):
+            memory_context = assistant.build_context(question)
+        with OBSERVABILITY.span(
+            "llm.answer",
+            "generation",
+            {"question_chars": len(question)},
+        ):
+            answer = assistant.ask(question)
         return (
             [*history, [question, answer]],
             "",
@@ -593,6 +620,7 @@ app = FastAPI(
     version="0.2.0",
     description="Document RAG and long-term memory API for the React frontend.",
 )
+ADMIN_AUTH.install_session_middleware(app)
 FRONTEND_DIST = APP_DIR / "frontend" / "dist"
 PACKAGED_FRONTEND_DIST = APP_DIR / "quivr_mempalace_rag_ui" / "static"
 if not (FRONTEND_DIST / "index.html").exists() and (
@@ -606,6 +634,50 @@ if (FRONTEND_DIST / "assets").is_dir():
         StaticFiles(directory=str(FRONTEND_DIST / "assets")),
         name="frontend-assets",
     )
+
+
+@app.on_event("shutdown")
+def flush_observability() -> None:
+    OBSERVABILITY.flush()
+
+
+@app.get("/admin/login", name="admin_login")
+async def admin_login(request: Request) -> Response:
+    """Start the Microsoft Entra ID authorization-code flow."""
+
+    return await ADMIN_AUTH.login(request)
+
+
+@app.get("/admin/callback", name="admin_callback")
+async def admin_callback(request: Request) -> Response:
+    """Validate the Microsoft identity and create an allowlisted admin session."""
+
+    await ADMIN_AUTH.callback(request)
+    return RedirectResponse(url="/?view=observability", status_code=303)
+
+
+@app.get("/admin/logout", name="admin_logout")
+def admin_logout(request: Request) -> Response:
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.get("/api/admin/me")
+def admin_me(request: Request) -> dict[str, Any]:
+    identity = ADMIN_AUTH.current_admin(request)
+    return {
+        "authenticated": identity is not None,
+        "configured": ADMIN_AUTH.configured,
+        "admin": identity,
+    }
+
+
+@app.get("/api/admin/observability")
+def admin_observability(request: Request) -> dict[str, Any]:
+    """Return recent safe trace metadata for the Microsoft-authenticated admin."""
+
+    identity = ADMIN_AUTH.require_admin(request)
+    return {"admin": identity, **OBSERVABILITY.snapshot()}
 
 
 @app.get("/api/health")
@@ -624,6 +696,29 @@ def api_index_documents(
     provider: str = Form("Groq"),
     model_name: str = Form(""),
     brain_name: str = Form("mempalace-quivr"),
+) -> dict[str, Any]:
+    with OBSERVABILITY.start_trace(
+        "rag.index",
+        {
+            "file_count": len(files),
+            "provider": provider,
+            "model": model_name or _default_model(provider),
+            "brain_name": brain_name.strip() or "mempalace-quivr",
+        },
+    ) as trace:
+        with trace.span(
+            "rag.index_documents",
+            "chain",
+            {"file_count": len(files), "provider": provider},
+        ):
+            return _index_documents_route(files, provider, model_name, brain_name)
+
+
+def _index_documents_route(
+    files: list[UploadFile],
+    provider: str,
+    model_name: str,
+    brain_name: str,
 ) -> dict[str, Any]:
     """Accept browser uploads, parse them locally, and build the Quivr Brain."""
 
@@ -677,42 +772,60 @@ def _load_chunk_count(message: str) -> int:
 
 @app.post("/api/recall")
 def api_recall_memories(request: RecallRequest) -> dict[str, Any]:
-    context = recall_memories(
-        request.question,
-        request.wing,
-        request.palace_path,
-        request.n_results,
-    )
-    return {"ok": not context.startswith("Memory retrieval error:"), "context": context}
+    with OBSERVABILITY.start_trace(
+        "memory.recall",
+        {
+            "question_chars": len(request.question),
+            "wing": request.wing.strip(),
+            "n_results": request.n_results,
+        },
+    ) as trace:
+        with trace.span("memory.retrieve", "retriever", {"n_results": request.n_results}):
+            context = recall_memories(
+                request.question,
+                request.wing,
+                request.palace_path,
+                request.n_results,
+            )
+        return {"ok": not context.startswith("Memory retrieval error:"), "context": context}
 
 
 @app.post("/api/ask")
 async def api_answer_question(request: AskRequest) -> dict[str, Any]:
-    if STATE.brain is None:
-        return {
-            "ok": False,
-            "history": request.history,
-            "context": "",
-            "status": "Index documents first.",
-        }
+    with OBSERVABILITY.start_trace(
+        "rag.ask",
+        {
+            **content_metadata(request.question, label="question"),
+            "wing": request.wing.strip(),
+            "n_results": request.n_results,
+        },
+    ) as trace:
+        if STATE.brain is None:
+            return {
+                "ok": False,
+                "history": request.history,
+                "context": "",
+                "status": "Index documents first.",
+            }
 
-    history, _, context, status = await run_in_threadpool(
-        answer_question,
-        request.question,
-        request.history,
-        STATE.brain,
-        request.wing,
-        request.palace_path,
-        request.n_results,
-    )
-    answer = history[-1][1] if history and len(history[-1]) > 1 else ""
-    return {
-        "ok": status.startswith("Quivr RAG answered"),
-        "answer": answer,
-        "history": history,
-        "context": context,
-        "status": status,
-    }
+        with trace.span("rag.answer", "chain", {"history_turns": len(request.history)}):
+            history, _, context, status = await run_in_threadpool(
+                answer_question,
+                request.question,
+                request.history,
+                STATE.brain,
+                request.wing,
+                request.palace_path,
+                request.n_results,
+            )
+        answer = history[-1][1] if history and len(history[-1]) > 1 else ""
+        return {
+            "ok": status.startswith("Quivr RAG answered"),
+            "answer": answer,
+            "history": history,
+            "context": context,
+            "status": status,
+        }
 
 class TTSRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
@@ -724,36 +837,39 @@ async def api_tts(request: TTSRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
 
-    try:
-        import soundfile as sf
+    with OBSERVABILITY.start_trace(
+        "tts.synthesis",
+        {**content_metadata(request.text), "voice": request.voice},
+    ) as trace:
+        with trace.span("tts.generate", "generation", {"voice": request.voice}):
+            try:
+                import soundfile as sf
 
-        async with KOKORO_SYNTHESIS_SEMAPHORE:
-            kokoro = await run_in_threadpool(get_kokoro)
+                async with KOKORO_SYNTHESIS_SEMAPHORE:
+                    kokoro = await run_in_threadpool(get_kokoro)
 
-            # Generate the audio samples
-            samples, sample_rate = await run_in_threadpool(
-                kokoro.create,
-                request.text,
-                voice=request.voice,
-                speed=1.0,
-                lang="en-us",
-            )
+                    samples, sample_rate = await run_in_threadpool(
+                        kokoro.create,
+                        request.text,
+                        voice=request.voice,
+                        speed=1.0,
+                        lang="en-us",
+                    )
 
-        # Write to in-memory buffer
-        buffer = io.BytesIO()
-        sf.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")
-        buffer.seek(0)
+                buffer = io.BytesIO()
+                sf.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")
+                buffer.seek(0)
 
-        return StreamingResponse(
-            buffer,
-            media_type="audio/wav",
-            headers={"Content-Disposition": "inline; filename=quivr-response.wav"},
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"TTS generation failed: {type(exc).__name__}: {exc}",
-        ) from exc
+                return StreamingResponse(
+                    buffer,
+                    media_type="audio/wav",
+                    headers={"Content-Disposition": "inline; filename=quivr-response.wav"},
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"TTS generation failed: {type(exc).__name__}: {exc}",
+                ) from exc
 
 
 @app.get("/{path:path}")

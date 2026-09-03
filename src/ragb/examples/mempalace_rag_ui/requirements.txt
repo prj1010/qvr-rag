@@ -9,6 +9,8 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.34,<1
 python-multipart>=0.0.20,<1
+authlib>=1.3,<2
+itsdangerous>=2.2,<3
 
 # --- LangChain core & providers ---
 langchain-core>=0.3,<0.4

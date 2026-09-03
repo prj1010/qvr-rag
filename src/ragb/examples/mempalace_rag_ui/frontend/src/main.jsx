@@ -3,22 +3,30 @@ import { createRoot } from "react-dom/client";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Archive,
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
   ArrowUp,
   BrainCircuit,
   Check,
   ChevronDown,
   CircleHelp,
+  Clock3,
+  ExternalLink,
   FileText,
   FolderOpen,
   Gauge,
   Layers3,
   LibraryBig,
   LoaderCircle,
+  LogOut,
   MessageSquareText,
   Network,
   PanelLeft,
   Plus,
   Search,
+  RefreshCw,
+  ShieldCheck,
   Settings2,
   Sparkles,
   UploadCloud,
@@ -46,6 +54,11 @@ async function apiRequest(url, options = {}) {
 }
 
 function App() {
+  const [view, setView] = useState(() => {
+    return new URLSearchParams(window.location.search).get("view") === "observability"
+      ? "observability"
+      : "workspace";
+  });
   const [provider, setProvider] = useState("Groq");
   const [model, setModel] = useState(MODELS.Groq);
   const [brainName, setBrainName] = useState("mempalace-quivr");
@@ -63,6 +76,15 @@ function App() {
   const [isRecalling, setIsRecalling] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef(null);
+
+  function openObservability() {
+    window.location.href = "/admin/login";
+  }
+
+  function openWorkspace() {
+    window.history.pushState({}, "", "/");
+    setView("workspace");
+  }
 
   useEffect(() => {
     setModel(MODELS[provider]);
@@ -163,6 +185,10 @@ function App() {
     setStatus({ tone: "neutral", text: "Conversation cleared." });
   }
 
+  if (view === "observability") {
+    return <AdminConsole onBack={openWorkspace} />;
+  }
+
   return (
     <div className="app-shell">
       <div className="noise" />
@@ -178,6 +204,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <button className="admin-nav-button" type="button" onClick={openObservability}><ShieldCheck size={15} /> Admin observability</button>
           <div className="live-pill"><span className="live-dot" /> Local workspace</div>
           <button className="icon-button" type="button" aria-label="Help"><CircleHelp size={18} /></button>
           <button className="avatar" type="button" aria-label="Profile">GS</button>
@@ -354,6 +381,150 @@ function App() {
 
 function StatCard({ icon, label, value, detail, accent }) {
   return <motion.div className={`stat-card ${accent}`} whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300, damping: 20 }}><div className="stat-icon">{icon}</div><div className="stat-text"><div className="stat-label">{label}</div><div className="stat-value">{value}</div><div className="stat-detail">{detail}</div></div></motion.div>;
+}
+
+function AdminConsole({ onBack }) {
+  const [dashboard, setDashboard] = useState(null);
+  const [selectedTraceId, setSelectedTraceId] = useState(null);
+  const [error, setError] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  async function loadDashboard() {
+    setIsRefreshing(true);
+    try {
+      const meResponse = await fetch("/api/admin/me");
+      const me = await meResponse.json().catch(() => ({}));
+      if (meResponse.status === 401 || !me.authenticated) {
+        window.location.href = "/admin/login";
+        return;
+      }
+      const payload = await apiRequest("/api/admin/observability");
+      setDashboard(payload);
+      setError("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not load observability data.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    loadDashboard();
+    const interval = window.setInterval(loadDashboard, 10000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const summary = dashboard?.summary || {};
+  const traces = dashboard?.traces || [];
+  const selectedTrace = traces.find((trace) => trace.trace_id === selectedTraceId) || traces[0];
+  const integrations = dashboard?.integrations || {};
+
+  return (
+    <div className="app-shell admin-shell">
+      <div className="noise" />
+      <div className="aurora aurora-one" />
+      <div className="aurora aurora-two" />
+      <header className="topbar">
+        <div className="brand-lockup">
+          <div className="brand-mark"><Activity size={21} /></div>
+          <div>
+            <div className="brand-name">mempalace <span>×</span> quivr</div>
+            <div className="brand-caption">Admin observability console</div>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <div className="admin-identity"><ShieldCheck size={14} /> {dashboard?.admin?.name || "Admin"}</div>
+          <button className="icon-button" type="button" onClick={loadDashboard} aria-label="Refresh traces"><RefreshCw className={isRefreshing ? "spin" : ""} size={17} /></button>
+          <button className="icon-button" type="button" onClick={() => { window.location.href = "/admin/logout"; }} aria-label="Sign out"><LogOut size={17} /></button>
+        </div>
+      </header>
+
+      <main className="page-container">
+        <section className="hero-section admin-hero">
+          <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={15} /> Back to workspace</button>
+          <div className="eyebrow"><Activity size={14} /> Open-source RAG observability</div>
+          <h1>See every <span>decision.</span></h1>
+          <p className="hero-copy">Trace retrieval, memory, model generation, and TTS as one operational story. Content capture is off by default; Langfuse receives safe metadata unless you explicitly opt in.</p>
+        </section>
+
+        {error && <div className="status-banner error"><AlertTriangle size={14} /> {error}</div>}
+        <section className="stats-grid" aria-label="Observability overview">
+          <StatCard icon={<Activity size={18} />} label="Traces in memory" value={summary.total_traces ?? "—"} detail="Most recent 100" accent="violet" />
+          <StatCard icon={<Clock3 size={18} />} label="P95 latency" value={formatDuration(summary.p95_latency_ms)} detail={`Average ${formatDuration(summary.avg_latency_ms)}`} accent="cyan" />
+          <StatCard icon={<AlertTriangle size={18} />} label="Error rate" value={formatPercent(summary.error_rate)} detail={`${summary.error_traces || 0} failed traces`} accent="amber" />
+          <StatCard icon={<ShieldCheck size={18} />} label="Trace export" value={integrations.langfuse_configured ? "Langfuse live" : "Local only"} detail={integrations.content_capture ? "Content capture on" : "Metadata only"} accent="green" />
+        </section>
+
+        <div className="admin-grid">
+          <section className="panel trace-panel">
+            <div className="panel-heading">
+              <div><div className="section-kicker"><Activity size={14} /> Recent traces</div><h2>What the system is doing</h2></div>
+              <div className="source-count">Auto-refresh 10s</div>
+            </div>
+            {traces.length === 0 ? (
+              <div className="admin-empty"><Activity size={28} /><h3>Waiting for traffic</h3><p>Ask a question, recall a memory, index a document, or play TTS to create the first trace.</p></div>
+            ) : (
+              <div className="trace-list">
+                {traces.map((trace) => (
+                  <button className={`trace-row ${selectedTrace?.trace_id === trace.trace_id ? "selected" : ""}`} type="button" key={trace.trace_id} onClick={() => setSelectedTraceId(trace.trace_id)}>
+                    <span className={`trace-status ${trace.status}`} />
+                    <span className="trace-main"><strong>{trace.name}</strong><small>{formatDate(trace.started_at)} · {trace.spans.length} span{trace.spans.length === 1 ? "" : "s"}</small></span>
+                    <span className="trace-duration">{formatDuration(trace.duration_ms)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel detail-panel">
+            <div className="panel-heading">
+              <div><div className="section-kicker"><ShieldCheck size={14} /> Trace detail</div><h2>{selectedTrace?.name || "No trace selected"}</h2></div>
+              {integrations.langfuse_configured && <button className="text-button" type="button" onClick={() => window.open(integrations.langfuse_host, "_blank", "noopener,noreferrer")}><ExternalLink size={13} /> Langfuse</button>}
+            </div>
+            {selectedTrace ? (
+              <>
+                <div className="trace-meta"><span>{selectedTrace.status}</span><span>{formatDate(selectedTrace.started_at)}</span><span>{formatDuration(selectedTrace.duration_ms)}</span></div>
+                <div className="span-list">
+                  {selectedTrace.spans.map((span) => (
+                    <div className="span-row" key={span.span_id}>
+                      <span className={`trace-status ${span.status}`} />
+                      <span className="span-main"><strong>{span.name}</strong><small>{span.kind} · {Object.entries(span.attributes || {}).map(([key, value]) => `${key}: ${value}`).join(" · ") || "no attributes"}</small></span>
+                      <span className="trace-duration">{formatDuration(span.duration_ms)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : <div className="admin-empty compact"><ShieldCheck size={25} /><p>Trace details will appear here.</p></div>}
+          </section>
+        </div>
+
+        <section className="panel operations-panel">
+          <div className="panel-heading compact"><div><div className="section-kicker"><Gauge size={14} /> Instrumentation map</div><h3>Every important path is measurable</h3></div></div>
+          <div className="operation-grid">
+            {Object.entries(summary.operations || {}).map(([name, count]) => <div className="operation-card" key={name}><span>{name}</span><strong>{count}</strong></div>)}
+            {Object.keys(summary.operations || {}).length === 0 && <div className="operation-card muted-operation">Operations appear after the first request.</div>}
+          </div>
+        </section>
+      </main>
+      <footer className="footer"><span>Microsoft Entra protected</span><span className="footer-divider" /><span>Langfuse-compatible traces <b>·</b> safe metadata by default</span></footer>
+    </div>
+  );
+}
+
+function formatDuration(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) return "—";
+  const duration = Number(value);
+  return duration < 1000 ? `${Math.round(duration)} ms` : `${(duration / 1000).toFixed(2)} s`;
+}
+
+function formatPercent(value) {
+  if (value === undefined || value === null) return "—";
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function formatDate(value) {
+  if (!value) return "unknown time";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function Message({ prompt, answer }) {
