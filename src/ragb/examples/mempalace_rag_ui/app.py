@@ -650,9 +650,26 @@ def flush_observability() -> None:
 
 @app.get("/admin/login", name="admin_login")
 async def admin_login(request: Request) -> Response:
-    """Start the Microsoft Entra ID authorization-code flow."""
+    """Start SSO, or redirect to the explicitly enabled temporary fallback."""
 
     return await ADMIN_AUTH.login(request)
+
+
+@app.get("/admin/fallback", name="admin_fallback")
+def admin_fallback() -> Response:
+    """Render the temporary token login page when Microsoft SSO is unavailable."""
+
+    return ADMIN_AUTH.fallback_page()
+
+
+@app.post("/admin/fallback", name="admin_fallback_submit")
+def admin_fallback_submit(
+    request: Request, token: str = Form(...)
+) -> Response:
+    """Create the same protected admin session using the temporary token."""
+
+    ADMIN_AUTH.create_fallback_session(request, token)
+    return RedirectResponse(url="/?view=observability", status_code=303)
 
 
 @app.get("/admin/callback", name="admin_callback")
@@ -675,6 +692,15 @@ def admin_me(request: Request) -> dict[str, Any]:
     return {
         "authenticated": identity is not None,
         "configured": ADMIN_AUTH.configured,
+        "fallback_configured": ADMIN_AUTH.fallback_configured,
+        "auth_methods": [
+            method
+            for method, enabled in (
+                ("microsoft", ADMIN_AUTH.configured),
+                ("fallback", ADMIN_AUTH.fallback_configured),
+            )
+            if enabled
+        ],
         "admin": identity,
     }
 

@@ -50,6 +50,12 @@ services:
         sync: false
       - key: COOKIE_SECURE
         value: "true"
+      - key: ADMIN_FALLBACK_ENABLED
+        value: "false"
+      - key: ADMIN_FALLBACK_TOKEN
+        sync: false
+      - key: ADMIN_FALLBACK_EMAIL
+        value: fallback-admin@local
       - key: LANGFUSE_PUBLIC_KEY
         sync: false
       - key: LANGFUSE_SECRET_KEY

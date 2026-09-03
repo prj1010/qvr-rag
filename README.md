@@ -319,6 +319,22 @@ buffer for the current process.
    users are sent through Microsoft sign-in before `/api/admin/observability`
    can return any trace data.
 
+### Temporary fallback access
+
+If Microsoft SSO is not ready, set these Render variables temporarily:
+
+```text
+ADMIN_FALLBACK_ENABLED=true
+ADMIN_FALLBACK_TOKEN=<long random token, at least 16 characters>
+ADMIN_FALLBACK_EMAIL=fallback-admin@yourcompany.com
+SESSION_SECRET=<long random session secret>
+```
+
+Open **Admin observability** and enter the token. The fallback uses the same
+session-protected admin console, but it is disabled by default and should be
+turned off as soon as Entra SSO is configured. The token is never placed in a
+URL or written to the AGT audit log.
+
 ## Agent Governance Toolkit fork
 
 The admin console also exposes the retrieval governance layer from the

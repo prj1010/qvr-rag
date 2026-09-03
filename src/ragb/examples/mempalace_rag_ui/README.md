@@ -82,6 +82,11 @@ audit events, and a dry-run policy evaluator. Set the `AGT_*` variables in
 `.env` to change the policy; indexing fails closed if the governance package
 cannot be loaded.
 
+For temporary access before Microsoft SSO is configured, set
+`ADMIN_FALLBACK_ENABLED=true` and a random `ADMIN_FALLBACK_TOKEN` of at least
+16 characters. The **Admin observability** button then opens a token login page.
+Disable the fallback after Entra SSO is ready.
+
 The app uses NVIDIA's `nvidia/nemotron-3-embed-1b` embedding model for document
 indexing. Hosted embeddings require
 `NVIDIA_API_KEY`; a self-hosted NVIDIA embedding NIM can be selected with
