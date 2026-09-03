@@ -9,6 +9,7 @@ services:
     # Build: install the bundled Quivr/MemPalace sources, Python deps, the
     # React frontend, and a small TTS model cache.
     buildCommand: |
+      set -e
       cd src/ragb/examples/mempalace_rag_ui
       pip install --upgrade pip
       pip install -e ../../core
@@ -34,7 +35,7 @@ services:
     # Render sets the PORT env var automatically
     envVars:
       - key: PYTHON_VERSION
-        value: 3.13.14
+        value: 3.12.10
       - key: GROQ_API_KEY
         sync: false          # Set this in the Render dashboard — never commit it
       - key: GROQ_MODEL

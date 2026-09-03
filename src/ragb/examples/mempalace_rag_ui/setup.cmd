@@ -14,13 +14,13 @@ if errorlevel 1 (
 
 if not exist "%PY%" (
     echo Creating the project virtual environment with uv...
-    uv venv "%PROJECT_ROOT%\.venv" --python 3.13
+    uv venv "%PROJECT_ROOT%\.venv" --python 3.12
     if errorlevel 1 exit /b 1
 )
 
 for /f "tokens=2" %%V in ('"%PY%" --version 2^>nul') do set "PY_VERSION=%%V"
-if not "%PY_VERSION:~0,4%"=="3.13" (
-    echo This project requires Python 3.13. Found Python %PY_VERSION%.
+if not "%PY_VERSION:~0,4%"=="3.12" (
+    echo This project requires Python 3.12. Found Python %PY_VERSION%.
     echo Remove the existing .venv and run setup.cmd again:
     echo rmdir /s /q "%PROJECT_ROOT%\.venv"
     exit /b 1

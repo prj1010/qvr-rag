@@ -34,13 +34,13 @@ FastAPI application API
 ## Requirements
 
 - Windows 10 or Windows 11
-- Python 3.13
+- Python 3.12
 - Node.js 20 or newer
 - `uv`
 - PyMuPDF4LLM and RapidOCR for PDF extraction, including scanned PDFs
 
-Python 3.14 is not currently supported because one of Quivr Core's language
-detection dependencies may require a native build on Python 3.14.
+Python 3.13 and newer are not currently supported because the RapidOCR
+dependency used for scanned PDFs declares Python `<3.13`.
 
 ## Project structure
 
@@ -70,7 +70,7 @@ virtual environment:
 ```cmd
 deactivate
 rmdir /s /q .venv
-uv venv .venv --python 3.13
+uv venv .venv --python 3.12
 call .venv\Scripts\activate.bat
 ```
 
@@ -85,7 +85,7 @@ uv pip install --python .venv\Scripts\python.exe -r src\ragb\examples\mempalace_
 ```
 
 Alternatively, run the application setup script after recreating the Python
-3.13 environment:
+3.12 environment:
 
 ```cmd
 cd /d src\ragb\examples\mempalace_rag_ui
@@ -204,7 +204,7 @@ Check the Python version:
 .venv\Scripts\python.exe --version
 ```
 
-Use Python 3.13, recreate `.venv`, and repeat the installation.
+Use Python 3.12, recreate `.venv`, and repeat the installation.
 
 ### React frontend is missing
 
@@ -263,7 +263,7 @@ The FastAPI application is compatible with a Databricks Apps deployment model:
 ## Render deployment
 
 The root `render.yaml` is configured for a native Python web service. It pins
-Python 3.13, installs the bundled Quivr Core and MemPalace packages, builds
+Python 3.12, installs the bundled Quivr Core and MemPalace packages, builds
 the React frontend, pre-caches the smaller Kokoro int8 model, and exposes
 `/api/health` for Render HTTP health checks.
 
