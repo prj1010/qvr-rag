@@ -20,6 +20,7 @@ env/
 # Node / frontend
 node_modules/
 frontend/dist/
+src/ragb/examples/mempalace_rag_ui/models/
 
 # IDE
 .vscode/

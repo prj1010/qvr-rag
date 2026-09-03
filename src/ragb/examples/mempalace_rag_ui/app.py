@@ -7,10 +7,12 @@ import asyncio
 import csv
 import io
 import os
+import shutil
 import tempfile
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -47,37 +49,71 @@ class AppState:
 
 
 STATE = AppState()
+KOKORO_INIT_LOCK = Lock()
 
-# Ensure Kokoro models exist, download if necessary
-# On Render (Linux) use /tmp so it survives between requests in the same dyno.
-# On Windows (local dev) put the models/ folder next to the app script.
-_tmp_kokoro = Path("/tmp/kokoro_models")
-MODELS_DIR = _tmp_kokoro if _tmp_kokoro.parent.exists() else APP_DIR / "models"
-ONNX_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
-VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.json"
+# Ensure Kokoro models exist, downloading them on the first TTS request.
+# Kokoro-ONNX 0.6.x uses the v1.0 model and a NumPy voices archive. Keep the
+# cache configurable so local Windows runs can use the app directory while
+# hosted Linux deployments can use an ephemeral writable directory.
+DEFAULT_MODELS_DIR = APP_DIR / "models" if os.name == "nt" else Path("/tmp/kokoro_models")
+MODELS_DIR = Path(
+    os.getenv("KOKORO_MODELS_DIR", str(DEFAULT_MODELS_DIR))
+).expanduser()
+ONNX_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.0/kokoro-v1.0.onnx"
+)
+VOICES_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.0/voices-v1.0.bin"
+)
+MODEL_FILENAME = "kokoro-v1.0.onnx"
+VOICES_FILENAME = "voices-v1.0.bin"
+
+
+def _download_kokoro_asset(url: str, destination: Path) -> None:
+    """Download a Kokoro asset atomically so interrupted downloads are ignored."""
+
+    temporary_path = destination.with_name(f"{destination.name}.download")
+    print(f"Downloading Kokoro asset to {destination}...")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, temporary_path.open(
+            "wb"
+        ) as output:
+            shutil.copyfileobj(response, output, length=1024 * 1024)
+        temporary_path.replace(destination)
+    except Exception as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Could not download Kokoro asset from {url}: {exc}") from exc
+
 
 def _ensure_kokoro_models() -> tuple[Path, Path]:
+    global MODELS_DIR
+    MODELS_DIR = Path(
+        os.getenv("KOKORO_MODELS_DIR", str(DEFAULT_MODELS_DIR))
+    ).expanduser()
     MODELS_DIR.mkdir(exist_ok=True, parents=True)
-    onnx_path = MODELS_DIR / "kokoro-v0_19.onnx"
-    voices_path = MODELS_DIR / "voices.json"
-    
-    if not onnx_path.exists():
-        print(f"Downloading Kokoro ONNX model to {onnx_path}...")
-        urllib.request.urlretrieve(ONNX_URL, str(onnx_path))
-    if not voices_path.exists():
-        print(f"Downloading Kokoro voices to {voices_path}...")
-        urllib.request.urlretrieve(VOICES_URL, str(voices_path))
-        
+    onnx_path = MODELS_DIR / MODEL_FILENAME
+    voices_path = MODELS_DIR / VOICES_FILENAME
+
+    if not onnx_path.is_file() or onnx_path.stat().st_size == 0:
+        _download_kokoro_asset(ONNX_URL, onnx_path)
+    if not voices_path.is_file() or voices_path.stat().st_size == 0:
+        _download_kokoro_asset(VOICES_URL, voices_path)
+
     return onnx_path, voices_path
 
 def get_kokoro():
     if STATE.kokoro is None:
-        try:
-            from kokoro_onnx import Kokoro
-            onnx_path, voices_path = _ensure_kokoro_models()
-            STATE.kokoro = Kokoro(str(onnx_path), str(voices_path))
-        except ImportError:
-            raise RuntimeError("kokoro-onnx is not installed.")
+        with KOKORO_INIT_LOCK:
+            if STATE.kokoro is None:
+                try:
+                    from kokoro_onnx import Kokoro
+
+                    onnx_path, voices_path = _ensure_kokoro_models()
+                    STATE.kokoro = Kokoro(str(onnx_path), str(voices_path))
+                except ImportError as exc:
+                    raise RuntimeError("kokoro-onnx is not installed.") from exc
     return STATE.kokoro
 
 
@@ -668,11 +704,12 @@ async def api_tts(request: TTSRequest):
     """Generate audio for the given text using Kokoro-ONNX."""
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
-    
+
     try:
         import soundfile as sf
-        kokoro = get_kokoro()
-        
+
+        kokoro = await run_in_threadpool(get_kokoro)
+
         # Generate the audio samples
         samples, sample_rate = await run_in_threadpool(
             kokoro.create,
@@ -684,12 +721,19 @@ async def api_tts(request: TTSRequest):
         
         # Write to in-memory buffer
         buffer = io.BytesIO()
-        sf.write(buffer, samples, sample_rate, format="WAV")
+        sf.write(buffer, samples, sample_rate, format="WAV", subtype="PCM_16")
         buffer.seek(0)
-        
-        return StreamingResponse(buffer, media_type="audio/wav")
+
+        return StreamingResponse(
+            buffer,
+            media_type="audio/wav",
+            headers={"Content-Disposition": "inline; filename=quivr-response.wav"},
+        )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS generation failed: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @app.get("/{path:path}")

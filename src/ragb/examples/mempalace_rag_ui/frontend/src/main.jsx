@@ -359,7 +359,25 @@ function StatCard({ icon, label, value, detail, accent }) {
 function Message({ prompt, answer }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [audioError, setAudioError] = useState("");
   const audioRef = useRef(null);
+  const audioUrlRef = useRef("");
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+    };
+  }, []);
+
+  function releaseAudioUrl() {
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = "";
+    }
+  }
 
   async function handlePlay() {
     if (isPlaying && audioRef.current) {
@@ -372,28 +390,37 @@ function Message({ prompt, answer }) {
     if (!answer) return;
 
     setIsLoadingAudio(true);
+    setAudioError("");
     try {
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: answer, voice: "af_bella" }),
       });
-      
       if (!response.ok) {
-        throw new Error("Failed to generate audio");
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Failed to generate audio.");
       }
-      
+
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play();
-        setIsPlaying(true);
-        audioRef.current.onended = () => setIsPlaying(false);
+      if (!blob.size || !audioRef.current) {
+        throw new Error("The TTS service returned an empty audio file.");
       }
+
+      releaseAudioUrl();
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      audioRef.current.src = url;
+      audioRef.current.onended = () => setIsPlaying(false);
+      audioRef.current.onerror = () => {
+        setIsPlaying(false);
+        setAudioError("The browser could not play the generated audio.");
+      };
+      await audioRef.current.play();
+      setIsPlaying(true);
     } catch (error) {
       console.error(error);
+      setAudioError(error instanceof Error ? error.message : "Could not play audio.");
     } finally {
       setIsLoadingAudio(false);
     }
@@ -413,12 +440,13 @@ function Message({ prompt, answer }) {
         <div className="message-content-wrapper">
           <div className="message-role-bar">
             <div className="message-role">Quivr + MemPalace</div>
-            <button className="tts-button" onClick={handlePlay} disabled={isLoadingAudio} aria-label="Play response">
+            <button className="tts-button" type="button" onClick={handlePlay} disabled={isLoadingAudio} aria-label="Play response">
               {isLoadingAudio ? <LoaderCircle className="spin" size={13} /> : isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
               {isPlaying ? " Stop" : isLoadingAudio ? " Loading..." : " Listen"}
             </button>
           </div>
           <div className="message-text answer-text">{answer}</div>
+          {audioError && <div className="audio-error" role="status">{audioError}</div>}
         </div>
       </div>
       <audio ref={audioRef} style={{ display: "none" }} />
