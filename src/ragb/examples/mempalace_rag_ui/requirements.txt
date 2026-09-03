@@ -24,6 +24,13 @@ quivr-core>=0.0.33,<0.1
 # --- MemPalace long-term memory ---
 quivr-mempalace>=0.1.0
 
+# --- Microsoft Agent Governance Toolkit (project fork, pinned for reproducible builds) ---
+# The repository is a monorepo; each direct reference must target its package
+# subdirectory. The pinned commit is prj1010/agent-governance-toolkit main.
+# The full core bundle is enabled on Linux/Render; RAG governance works on Windows.
+agent-governance-toolkit-core[full] @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-governance-toolkit-core ; sys_platform == "linux"
+agent-rag-governance @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-rag-governance
+
 # --- Voice / TTS (Kokoro) ---
 kokoro-onnx>=0.6.1,<0.7
 soundfile>=0.12,<1

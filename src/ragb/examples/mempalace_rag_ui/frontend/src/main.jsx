@@ -388,6 +388,9 @@ function AdminConsole({ onBack }) {
   const [selectedTraceId, setSelectedTraceId] = useState(null);
   const [error, setError] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [governanceInput, setGovernanceInput] = useState({ collection: "quivr-demo", text: "" });
+  const [governanceResult, setGovernanceResult] = useState(null);
+  const [isEvaluatingGovernance, setIsEvaluatingGovernance] = useState(false);
 
   async function loadDashboard() {
     setIsRefreshing(true);
@@ -408,6 +411,23 @@ function AdminConsole({ onBack }) {
     }
   }
 
+  async function evaluateGovernance(event) {
+    event.preventDefault();
+    setIsEvaluatingGovernance(true);
+    try {
+      const result = await apiRequest("/api/admin/governance/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(governanceInput),
+      });
+      setGovernanceResult(result);
+    } catch (requestError) {
+      setGovernanceResult({ decision: "error", reasons: [requestError.message] });
+    } finally {
+      setIsEvaluatingGovernance(false);
+    }
+  }
+
   useEffect(() => {
     loadDashboard();
     const interval = window.setInterval(loadDashboard, 10000);
@@ -418,6 +438,9 @@ function AdminConsole({ onBack }) {
   const traces = dashboard?.traces || [];
   const selectedTrace = traces.find((trace) => trace.trace_id === selectedTraceId) || traces[0];
   const integrations = dashboard?.integrations || {};
+  const governance = dashboard?.governance || {};
+  const governancePolicy = governance.policy || {};
+  const auditEvents = governance.audit_events || [];
 
   return (
     <div className="app-shell admin-shell">
@@ -505,6 +528,42 @@ function AdminConsole({ onBack }) {
             {Object.keys(summary.operations || {}).length === 0 && <div className="operation-card muted-operation">Operations appear after the first request.</div>}
           </div>
         </section>
+
+        <section className="panel governance-panel">
+          <div className="panel-heading compact">
+            <div><div className="section-kicker"><ShieldCheck size={14} /> Agent governance</div><h3>Policy controls for every retrieval</h3></div>
+            <div className={`governance-status ${governance.enabled ? "active" : "inactive"}`}><span />{governance.enabled ? "AGT active" : "AGT unavailable"}</div>
+          </div>
+          {governance.error && <div className="status-banner error"><AlertTriangle size={14} /> {governance.error}</div>}
+          <div className="governance-summary">
+            <div className="governance-card"><span>Agent identity</span><strong>{governance.agent_id || "—"}</strong></div>
+            <div className="governance-card"><span>Collection</span><strong>{governance.collection || "—"}</strong></div>
+            <div className="governance-card"><span>Rate limit</span><strong>{governancePolicy.max_retrievals_per_minute || 0} / min</strong></div>
+            <div className="governance-card"><span>AGT version</span><strong>{governance.core_version || governance.rag_version || "—"}</strong></div>
+          </div>
+          <div className="governance-rules"><span><b>Allowed:</b> {formatPolicyValues(governancePolicy.allowed_collections)}</span><span><b>Denied:</b> {formatPolicyValues(governancePolicy.denied_collections)}</span><span><b>Scanners:</b> {formatPolicyValues(governancePolicy.content_policies)}</span></div>
+          <div className="governance-lower-grid">
+            <div>
+              <div className="governance-label">Enabled capabilities</div>
+              <div className="capability-list">
+                {(governance.capabilities || []).map((capability) => <span className="capability-chip" key={capability}><Check size={12} /> {capability.replaceAll("_", " ")}</span>)}
+                {!governance.capabilities?.length && <span className="muted-operation">No governance capabilities reported.</span>}
+              </div>
+              <div className="governance-label audit-label">Recent audit events</div>
+              {auditEvents.length ? <div className="audit-list">{auditEvents.map((event, index) => <div className="audit-row" key={`${event.timestamp || "event"}-${index}`}><span className={`audit-decision ${event.decision === "allowed" ? "allow" : "deny"}`}>{event.decision || "event"}</span><span className="audit-main"><strong>{event.collection || "unknown collection"}</strong><small>{formatDate(event.timestamp)} · {event.num_chunks_retrieved ?? 0} chunks · {event.query_hash ? `${event.query_hash.slice(0, 12)}…` : "no query hash"}</small></span></div>)}</div> : <div className="admin-empty compact"><Activity size={22} /><p>Governed retrieval events will appear after the first question.</p></div>}
+            </div>
+            <form className="governance-evaluator" onSubmit={evaluateGovernance}>
+              <div className="governance-label">Dry-run a retrieval decision</div>
+              <p>Check collection access and content policies without calling the model or writing an audit event.</p>
+              <label htmlFor="governance-collection">Collection</label>
+              <input id="governance-collection" value={governanceInput.collection} onChange={(event) => setGovernanceInput((current) => ({ ...current, collection: event.target.value }))} />
+              <label htmlFor="governance-text">Query text</label>
+              <textarea id="governance-text" rows="4" value={governanceInput.text} onChange={(event) => setGovernanceInput((current) => ({ ...current, text: event.target.value }))} placeholder="Try a normal query or a policy-sensitive string…" />
+              <button className="secondary-button" type="submit" disabled={isEvaluatingGovernance}>{isEvaluatingGovernance ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />} {isEvaluatingGovernance ? "Checking…" : "Evaluate retrieval"}</button>
+              {governanceResult && <div className={`governance-result ${governanceResult.decision}`}><strong>{governanceResult.decision}</strong>{governanceResult.reasons?.length ? <span>{governanceResult.reasons.join(" ")}</span> : <span>No policy violations detected.</span>}</div>}
+            </form>
+          </div>
+        </section>
       </main>
       <footer className="footer"><span>Microsoft Entra protected</span><span className="footer-divider" /><span>Langfuse-compatible traces <b>·</b> safe metadata by default</span></footer>
     </div>
@@ -520,6 +579,10 @@ function formatDuration(value) {
 function formatPercent(value) {
   if (value === undefined || value === null) return "—";
   return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function formatPolicyValues(values) {
+  return values?.length ? values.join(", ") : "none configured";
 }
 
 function formatDate(value) {

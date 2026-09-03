@@ -63,6 +63,14 @@ echo Applying compatible dependency pins...
 uv pip install --python "%PY%" --upgrade "langchain-core>=0.3.85,<0.4" "packaging>=23.2,<25"
 if errorlevel 1 exit /b 1
 
+echo Installing the pinned Microsoft Agent Governance Toolkit fork...
+set "AGT_SHA=359a2332f57d9000924baba269ed24e4e15ad8b0"
+rem The full core bundle includes a Rust-backed Linux wheel. Windows uses the
+rem direct forked RAG governance package, which contains all controls used by
+rem this UI, without requiring a Visual Studio linker.
+uv pip install --python "%PY%" --upgrade "agent-rag-governance @ git+https://github.com/prj1010/agent-governance-toolkit.git@%AGT_SHA%#subdirectory=agent-governance-python/agent-rag-governance"
+if errorlevel 1 exit /b 1
+
 echo Installing the combined UI package in editable mode...
 uv pip install --python "%PY%" --upgrade --editable "%~dp0." --no-deps
 if errorlevel 1 exit /b 1

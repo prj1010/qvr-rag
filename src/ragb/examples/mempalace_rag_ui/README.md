@@ -75,6 +75,13 @@ publish_package.cmd
 4. Click **Recall memories** to test MemPalace alone.
 5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
 
+The Microsoft Agent Governance Toolkit fork is installed by the app
+`requirements.txt` at a pinned commit. The admin-only **Agent governance**
+panel displays collection access, rate limits, content scanners, privacy-safe
+audit events, and a dry-run policy evaluator. Set the `AGT_*` variables in
+`.env` to change the policy; indexing fails closed if the governance package
+cannot be loaded.
+
 The app uses NVIDIA's `nvidia/nemotron-3-embed-1b` embedding model for document
 indexing. Hosted embeddings require
 `NVIDIA_API_KEY`; a self-hosted NVIDIA embedding NIM can be selected with

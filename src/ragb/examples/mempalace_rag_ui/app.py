@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 from admin_auth import ADMIN_AUTH
+from governance import apply_governance, evaluate_governance, governance_snapshot
 from observability import OBSERVABILITY, content_metadata
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
@@ -470,6 +471,7 @@ def index_documents(
                     embedder=_build_embedder(),
                 )
             )
+            apply_governance(brain)
         return brain, (
             f"Indexed {len(file_paths)} document(s) into {len(chunks)} local chunks "
             "with Quivr RAG."
@@ -615,6 +617,11 @@ class RecallRequest(BaseModel):
     n_results: int = Field(default=5, ge=1, le=10)
 
 
+class GovernanceEvaluateRequest(BaseModel):
+    collection: str = Field(default="", max_length=200)
+    text: str = Field(default="", max_length=10000)
+
+
 app = FastAPI(
     title="Quivr + MemPalace RAG API",
     version="0.2.0",
@@ -677,7 +684,29 @@ def admin_observability(request: Request) -> dict[str, Any]:
     """Return recent safe trace metadata for the Microsoft-authenticated admin."""
 
     identity = ADMIN_AUTH.require_admin(request)
-    return {"admin": identity, **OBSERVABILITY.snapshot()}
+    return {
+        "admin": identity,
+        **OBSERVABILITY.snapshot(),
+        "governance": governance_snapshot(),
+    }
+
+
+@app.get("/api/admin/governance")
+def admin_governance(request: Request) -> dict[str, Any]:
+    """Return the active Agent Governance Toolkit policy and audit metadata."""
+
+    ADMIN_AUTH.require_admin(request)
+    return governance_snapshot()
+
+
+@app.post("/api/admin/governance/evaluate")
+def admin_governance_evaluate(
+    request: Request, payload: GovernanceEvaluateRequest
+) -> dict[str, Any]:
+    """Dry-run retrieval policy checks without executing a retrieval."""
+
+    ADMIN_AUTH.require_admin(request)
+    return evaluate_governance(payload.collection, payload.text)
 
 
 @app.get("/api/health")

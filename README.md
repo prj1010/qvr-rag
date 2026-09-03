@@ -319,6 +319,35 @@ buffer for the current process.
    users are sent through Microsoft sign-in before `/api/admin/observability`
    can return any trace data.
 
+## Agent Governance Toolkit fork
+
+The admin console also exposes the retrieval governance layer from the
+[project fork](https://github.com/prj1010/agent-governance-toolkit), pinned to
+commit `359a2332f57d9000924baba269ed24e4e15ad8b0`. The packages are installed
+directly from their monorepo subdirectories, so a similarly named PyPI package
+cannot silently replace the fork.
+
+On Linux/Render the requirements also install the fork's `core[full]` bundle.
+On Windows, `setup.cmd` installs the forked `agent-rag-governance` package and
+the controls used by this app; the optional core bundle is skipped because its
+Rust-backed ACS dependency currently publishes a manylinux wheel rather than a
+Windows wheel.
+
+The policy protects every Quivr retriever with collection allow/deny rules,
+rate limiting, PII and prompt-injection scanning, and privacy-safe audit
+hashes. The admin panel shows the active policy and audit events and includes a
+dry-run evaluator at **Agent governance**. Quivr calls the governed toolkit's
+synchronous `invoke` method in a threadpool when its internal async graph asks
+for documents; this preserves governance while keeping the FastAPI event loop
+responsive.
+
+Configure the policy with `AGT_*` variables in `.env` or Render. In production,
+keep `AGENT_RAG_AUDIT_SALT` secret, use a durable audit sink if audit history
+must survive restarts, and set an explicit `AGT_ALLOWED_COLLECTIONS` list. The
+native Render service can use the toolkit's policy and audit features, but
+Docker/OS sandbox features need a separate container-capable worker; they are
+not available inside a native Render Python service.
+
 ## Security
 
 Do not commit:
