@@ -1,0 +1,50 @@
+[project]
+name = "quivr-mempalace-rag-ui"
+version = "0.2.0"
+description = "A React and FastAPI RAG application combining Quivr document search with MemPalace memory"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    {name = "Gaurav Sarma"},
+]
+dependencies = [
+    "quivr-core>=0.0.33,<0.1",
+    "quivr-mempalace>=0.1.0",
+    "fastapi>=0.115,<1",
+    "langchain-core>=0.3,<0.4",
+    "langchain-text-splitters>=0.3,<0.4",
+    "langchain-groq>=0.3.5,<1",
+    "langchain-nvidia-ai-endpoints>=0.3.19,<1",
+    "langfuse>=2.57,<3",
+    "packaging>=23.2,<25",
+    "pillow>=10,<13",
+    "pymupdf>=1.24,<2",
+    "pypdf>=5,<7",
+    "pytesseract>=0.3.13,<1",
+    "python-dotenv>=1.0",
+    "python-docx>=1.1,<2",
+    "python-multipart>=0.0.20,<1",
+    "uvicorn[standard]>=0.34,<1",
+]
+
+[project.scripts]
+quivr-mempalace-rag-ui = "app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["quivr_mempalace_rag_ui*"]
+
+[tool.setuptools.package-data]
+quivr_mempalace_rag_ui = ["static/*", "static/assets/*"]
+
+[tool.uv.sources]
+quivr-core = { path = "../../core", editable = true }
+quivr-mempalace = { path = "../../../../examples/mempalace_quivr", editable = true }

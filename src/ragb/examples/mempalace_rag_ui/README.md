@@ -1,0 +1,93 @@
+# Combined Quivr + MemPalace RAG App
+
+This app combines the Quivr Core fork with the MemPalace integration and a
+React browser UI. FastAPI exposes the RAG and memory endpoints; Vite builds the
+frontend. The visual system uses Motion animations plus Magic UI, Aceternity UI,
+and Origin UI-inspired spotlight, glow, glass, and bento patterns.
+
+The setup script uses `uv` and installs the local Quivr Core checkout. When the
+standalone `quivr-mempalace` source package exists in the surrounding workspace,
+it is installed locally; otherwise the package is installed from PyPI.
+
+## Install as a pip package
+
+After publishing the package, users can install and run it with:
+
+```cmd
+python -m pip install quivr-mempalace-rag-ui
+quivr-mempalace-rag-ui
+```
+
+The package automatically installs its `quivr-mempalace` dependency. Both
+packages must be published before the one-command install works for new users.
+
+## Install from CMD
+
+```cmd
+cd /d qvr-rag\examples\mempalace_rag_ui
+setup.cmd
+notepad .env
+build_frontend.cmd
+```
+
+## Start the app
+
+```cmd
+cd /d qvr-rag\examples\mempalace_rag_ui
+run_app.cmd
+```
+
+Open `http://127.0.0.1:7862`.
+
+For frontend hot reload, start the API in one CMD window and Vite in another:
+
+```cmd
+cd /d qvr-rag\examples\mempalace_rag_ui
+run_app.cmd
+```
+
+```cmd
+cd /d qvr-rag\examples\mempalace_rag_ui
+run_frontend.cmd
+```
+
+Then open `http://127.0.0.1:5173`.
+
+## Build and publish from CMD
+
+```cmd
+cd /d qvr-rag\examples\mempalace_rag_ui
+build_all.cmd
+publish_all.cmd
+```
+
+Set your PyPI token before publishing:
+
+```cmd
+set "UV_PUBLISH_TOKEN=pypi-your-new-token"
+publish_package.cmd
+```
+
+1. Choose Groq or NVIDIA NIM.
+2. Upload PDF, DOCX, CSV, TXT, or Markdown documents.
+3. Click **Index documents**. Files are parsed locally, so a Megaparse/NATS
+   server is not required.
+4. Click **Recall memories** to test MemPalace alone.
+5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
+
+The app uses NVIDIA's `nvidia/nemotron-3-embed-1b` embedding model for document
+indexing. Hosted embeddings require
+`NVIDIA_API_KEY`; a self-hosted NVIDIA embedding NIM can be selected with
+`NVIDIA_EMBEDDING_BASE_URL`. Set `NVIDIA_EMBEDDING_BATCH_SIZE` to tune request
+batching and `QUIVR_CHUNK_SIZE`/`QUIVR_CHUNK_OVERLAP` to tune chunking.
+
+Scanned or image-only PDFs use local Tesseract OCR. Install the OCR engine once:
+
+```cmd
+install_ocr.cmd
+```
+
+Set `TESSERACT_CMD` in `.env` if Tesseract is installed but not on PATH. OCR
+can be slower than text extraction; lower `QUIVR_OCR_DPI` for faster indexing.
+Hugging Face support remains available in the standalone integration package
+through its optional `huggingface` extra.
