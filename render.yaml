@@ -9,14 +9,7 @@ services:
     buildCommand: |
       cd src/ragb/examples/mempalace_rag_ui
       pip install --upgrade pip
-      pip install kokoro-onnx>=0.3 soundfile>=0.12 numpy>=1.26 \
-        fastapi>=0.115 uvicorn[standard]>=0.34 python-multipart>=0.0.20 \
-        langchain-core>=0.3,<0.4 langchain-text-splitters>=0.3,<0.4 \
-        langchain-groq>=0.3.5 langchain-nvidia-ai-endpoints>=0.3.19 \
-        langfuse>=2.57,<3 packaging>=23.2,<25 \
-        pillow>=10 pymupdf>=1.24 pypdf>=5 pytesseract>=0.3.13 \
-        python-docx>=1.1 python-dotenv>=1.0 \
-        quivr-core>=0.0.33,<0.1 quivr-mempalace>=0.1.0
+      pip install -r requirements.txt
       cd frontend
       npm ci
       npm run build

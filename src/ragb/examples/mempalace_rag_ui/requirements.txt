@@ -1,0 +1,42 @@
+# ============================================================
+# Quivr MemPalace RAG UI — requirements.txt
+# Python >= 3.11 required
+# Install: pip install -r requirements.txt
+#          (or: uv pip install -r requirements.txt)
+# ============================================================
+
+# --- Web server ---
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+python-multipart>=0.0.20,<1
+
+# --- LangChain core & providers ---
+langchain-core>=0.3,<0.4
+langchain-text-splitters>=0.3,<0.4
+langchain-groq>=0.3.5,<1
+langchain-nvidia-ai-endpoints>=0.3.19,<1
+
+# --- Quivr RAG core ---
+quivr-core>=0.0.33,<0.1
+
+# --- MemPalace long-term memory ---
+quivr-mempalace>=0.1.0
+
+# --- Voice / TTS (Kokoro) ---
+kokoro-onnx>=0.3,<1
+soundfile>=0.12,<1
+numpy>=1.26,<3
+
+# --- Document parsing ---
+pillow>=10,<13
+pymupdf>=1.24,<2          # PDF rendering for OCR
+pypdf>=5,<7               # native PDF text extraction
+pytesseract>=0.3.13,<1    # OCR fallback for image-only PDFs
+python-docx>=1.1,<2       # DOCX support
+
+# --- Observability ---
+langfuse>=2.57,<3
+
+# --- Utilities ---
+python-dotenv>=1.0
+packaging>=23.2,<25
