@@ -12,11 +12,13 @@ dependencies = [
     "quivr-core>=0.0.33,<0.1",
     "quivr-mempalace>=0.1.0",
     "fastapi>=0.115,<1",
+    "kokoro-onnx>=0.3,<1",
     "langchain-core>=0.3,<0.4",
     "langchain-text-splitters>=0.3,<0.4",
     "langchain-groq>=0.3.5,<1",
     "langchain-nvidia-ai-endpoints>=0.3.19,<1",
     "langfuse>=2.57,<3",
+    "numpy>=1.26,<3",
     "packaging>=23.2,<25",
     "pillow>=10,<13",
     "pymupdf>=1.24,<2",
@@ -25,6 +27,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "python-docx>=1.1,<2",
     "python-multipart>=0.0.20,<1",
+    "soundfile>=0.12,<1",
     "uvicorn[standard]>=0.34,<1",
 ]
 

@@ -22,8 +22,10 @@ import {
   Settings2,
   Sparkles,
   UploadCloud,
+  Volume2,
   X,
   Zap,
+  Square,
 } from "lucide-react";
 import "./styles.css";
 
@@ -355,7 +357,73 @@ function StatCard({ icon, label, value, detail, accent }) {
 }
 
 function Message({ prompt, answer }) {
-  return <motion.div className="message-pair" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}><div className="user-message"><div className="message-avatar user">You</div><div><div className="message-role">Question</div><div className="message-text">{prompt}</div></div></div><div className="assistant-message"><div className="message-avatar assistant"><Sparkles size={14} /></div><div><div className="message-role">Quivr + MemPalace</div><div className="message-text answer-text">{answer}</div></div></div></motion.div>;
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const audioRef = useRef(null);
+
+  async function handlePlay() {
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsPlaying(false);
+      return;
+    }
+
+    if (!answer) return;
+
+    setIsLoadingAudio(true);
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: answer, voice: "af_bella" }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to generate audio");
+      }
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+        setIsPlaying(true);
+        audioRef.current.onended = () => setIsPlaying(false);
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoadingAudio(false);
+    }
+  }
+
+  return (
+    <motion.div className="message-pair" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="user-message">
+        <div className="message-avatar user">You</div>
+        <div>
+          <div className="message-role">Question</div>
+          <div className="message-text">{prompt}</div>
+        </div>
+      </div>
+      <div className="assistant-message">
+        <div className="message-avatar assistant"><Sparkles size={14} /></div>
+        <div className="message-content-wrapper">
+          <div className="message-role-bar">
+            <div className="message-role">Quivr + MemPalace</div>
+            <button className="tts-button" onClick={handlePlay} disabled={isLoadingAudio} aria-label="Play response">
+              {isLoadingAudio ? <LoaderCircle className="spin" size={13} /> : isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
+              {isPlaying ? " Stop" : isLoadingAudio ? " Loading..." : " Listen"}
+            </button>
+          </div>
+          <div className="message-text answer-text">{answer}</div>
+        </div>
+      </div>
+      <audio ref={audioRef} style={{ display: "none" }} />
+    </motion.div>
+  );
 }
 
 createRoot(document.getElementById("root")).render(<StrictMode><App /></StrictMode>);
