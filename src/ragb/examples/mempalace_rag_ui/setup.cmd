@@ -42,7 +42,13 @@ uv pip install --python "%PY%" --upgrade "langchain-groq>=0.3.5,<1" "langchain-n
 if errorlevel 1 exit /b 1
 
 echo Installing the local Quivr Core fork...
-uv pip install --python "%PY%" --upgrade -e "%SOURCE_ROOT%\core"
+set "QUIVR_CORE_PATH=%PROJECT_ROOT%\..\quivr-main\quivr-main\core"
+for %%I in ("%QUIVR_CORE_PATH%") do set "QUIVR_CORE_PATH=%%~fI"
+if exist "%QUIVR_CORE_PATH%\pyproject.toml" (
+    uv pip install --python "%PY%" --upgrade -e "%QUIVR_CORE_PATH%" --no-deps
+) else (
+    uv pip install --python "%PY%" --upgrade -e "%SOURCE_ROOT%\core"
+)
 if errorlevel 1 exit /b 1
 
 echo Installing the React API server...
