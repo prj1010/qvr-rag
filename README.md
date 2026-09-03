@@ -37,7 +37,7 @@ FastAPI application API
 - Python 3.13
 - Node.js 20 or newer
 - `uv`
-- Tesseract OCR for scanned PDFs
+- PyMuPDF4LLM and RapidOCR for PDF extraction, including scanned PDFs
 
 Python 3.14 is not currently supported because one of Quivr Core's language
 detection dependencies may require a native build on Python 3.14.
@@ -181,16 +181,10 @@ http://127.0.0.1:5173
 
 ## OCR support
 
-Text-based PDFs are extracted directly. Scanned PDFs use Tesseract OCR.
-
-Install Tesseract on Windows with:
-
-```cmd
-cd /d src\ragb\examples\mempalace_rag_ui
-install_ocr.cmd
-```
-
-If Tesseract is installed in a custom location, set `TESSERACT_CMD` in `.env`.
+PDFs are parsed with PyMuPDF4LLM. Regular PDFs use fast native text/layout
+extraction; pages without selectable text use the bundled RapidOCR ONNX
+backend. A system Tesseract installation is not required. Set
+`QUIVR_PDF_USE_OCR=false` if you only want to accept PDFs with selectable text.
 
 ## Troubleshooting
 
@@ -236,12 +230,11 @@ Then start the backend:
 cd /d C:\Users\GauravSarma\Downloads\ragb-0.2.0\src\ragb\examples\mempalace_rag_ui
 run_app.cmd
 ```
-### OCR is unavailable
+### Scanned PDF extraction is unavailable
 
-```cmd
-cd /d src\ragb\examples\mempalace_rag_ui
-install_ocr.cmd
-```
+Run `setup.cmd` again so `pymupdf4llm` and `rapidocr-onnxruntime` are installed.
+For faster indexing, use a text-based or already OCR'd PDF. OCR is much slower
+than native PDF text extraction.
 
 ### Check installed dependencies
 

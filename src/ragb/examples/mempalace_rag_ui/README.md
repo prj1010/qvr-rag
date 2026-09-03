@@ -93,13 +93,10 @@ indexing. Hosted embeddings require
 `NVIDIA_EMBEDDING_BASE_URL`. Set `NVIDIA_EMBEDDING_BATCH_SIZE` to tune request
 batching and `QUIVR_CHUNK_SIZE`/`QUIVR_CHUNK_OVERLAP` to tune chunking.
 
-Scanned or image-only PDFs use local Tesseract OCR. Install the OCR engine once:
-
-```cmd
-install_ocr.cmd
-```
-
-Set `TESSERACT_CMD` in `.env` if Tesseract is installed but not on PATH. OCR
-can be slower than text extraction; lower `QUIVR_OCR_DPI` for faster indexing.
+PDFs use PyMuPDF4LLM for layout-aware extraction. Pages without selectable text
+use the bundled RapidOCR ONNX backend, so a system Tesseract installation is
+not required. Set `QUIVR_PDF_USE_OCR=false` to reject scanned PDFs instead of
+running OCR. OCR can be slower than text extraction; lower `QUIVR_OCR_DPI` for
+faster indexing.
 Hugging Face support remains available in the standalone integration package
 through its optional `huggingface` extra.

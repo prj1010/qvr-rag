@@ -139,50 +139,19 @@ def get_kokoro():
     return STATE.kokoro
 
 
-def _ocr_pdf_documents(path: Path, metadata: dict[str, Any]) -> list[Document]:
-    """OCR an image-only PDF with local PyMuPDF and Tesseract."""
+def _load_pdf_documents(path: Path, metadata: dict[str, Any]) -> list[Document]:
+    """Extract text and layout-aware Markdown with PyMuPDF4LLM.
+
+    PyMuPDF4LLM uses native PDF text extraction for regular PDFs and invokes
+    RapidOCR only for pages that need OCR. This keeps Tesseract out of the
+    Render runtime while still supporting image-only PDFs.
+    """
 
     try:
-        import fitz
+        import pymupdf4llm
     except ImportError as exc:
         raise RuntimeError(
-            "OCR requires PyMuPDF. Run setup.cmd, then install Tesseract."
-        ) from exc
-
-    try:
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        raise RuntimeError(
-            "OCR requires pytesseract and Pillow. Run setup.cmd, then install Tesseract."
-        ) from exc
-
-    tesseract_cmd = os.getenv("TESSERACT_CMD", "").strip()
-    if not tesseract_cmd:
-        default_tesseract_paths = [
-            Path(os.getenv("ProgramFiles", r"C:\Program Files"))
-            / "Tesseract-OCR"
-            / "tesseract.exe",
-            Path(os.getenv("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-            / "Tesseract-OCR"
-            / "tesseract.exe",
-            Path(os.getenv("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
-            / "Programs"
-            / "Tesseract-OCR"
-            / "tesseract.exe",
-        ]
-        for candidate in default_tesseract_paths:
-            if candidate.exists():
-                tesseract_cmd = str(candidate)
-                break
-    if tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-    try:
-        pytesseract.get_tesseract_version()
-    except Exception as exc:
-        raise RuntimeError(
-            "Tesseract OCR is not installed or not on PATH. Run "
-            "install_ocr.cmd, or set TESSERACT_CMD in .env."
+            "PDF support requires pymupdf4llm. Run setup.cmd again."
         ) from exc
 
     try:
@@ -192,29 +161,36 @@ def _ocr_pdf_documents(path: Path, metadata: dict[str, Any]) -> list[Document]:
     if dpi < 72 or dpi > 400:
         raise ValueError("QUIVR_OCR_DPI must be between 72 and 400.")
 
-    scale = dpi / 72
-    documents: list[Document] = []
-    with fitz.open(str(path)) as pdf:
-        for page_number, page in enumerate(pdf, start=1):
-            pixmap = page.get_pixmap(
-                matrix=fitz.Matrix(scale, scale),
-                alpha=False,
-            )
-            image = Image.frombytes(
-                "RGB",
-                (pixmap.width, pixmap.height),
-                pixmap.samples,
-            )
-            text = pytesseract.image_to_string(image)
-            if text.strip():
-                documents.append(
-                    Document(
-                        page_content=text,
-                        metadata={**metadata, "page": page_number, "ocr": True},
-                    )
-                )
+    use_ocr = os.getenv("QUIVR_PDF_USE_OCR", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    try:
+        markdown = pymupdf4llm.to_markdown(
+            str(path),
+            use_ocr=use_ocr,
+            ocr_language=os.getenv("QUIVR_OCR_LANGUAGE", "eng"),
+            ocr_dpi=dpi,
+            show_progress=False,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not extract PDF text with PyMuPDF4LLM: {type(exc).__name__}: {exc}"
+        ) from exc
 
-    return documents
+    if not markdown.strip():
+        raise RuntimeError(
+            f"No text could be extracted from {path.name}. Enable QUIVR_PDF_USE_OCR "
+            "or upload a text-based/OCR PDF."
+        )
+    return [
+        Document(
+            page_content=markdown,
+            metadata={**metadata, "parser": "pymupdf4llm", "ocr_enabled": use_ocr},
+        )
+    ]
 
 
 def _load_local_documents(file_paths: list[str]) -> list[Document]:
@@ -246,28 +222,7 @@ def _load_local_documents(file_paths: list[str]) -> list[Document]:
             continue
 
         if suffix == ".pdf":
-            try:
-                from pypdf import PdfReader
-            except ImportError as exc:
-                raise RuntimeError(
-                    "PDF support requires pypdf. Run setup.cmd again."
-                ) from exc
-
-            reader = PdfReader(str(path))
-            pdf_documents: list[Document] = []
-            for page_number, page in enumerate(reader.pages, start=1):
-                text = page.extract_text() or ""
-                if text.strip():
-                    pdf_documents.append(
-                        Document(
-                            page_content=text,
-                            metadata={**metadata, "page": page_number},
-                        )
-                    )
-            if pdf_documents:
-                documents.extend(pdf_documents)
-            else:
-                documents.extend(_ocr_pdf_documents(path, metadata))
+            documents.extend(_load_pdf_documents(path, metadata))
             continue
 
         if suffix == ".docx":
