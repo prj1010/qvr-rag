@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { lazy, StrictMode, Suspense, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -39,6 +39,7 @@ import "./styles.css";
 
 const CUSTOM_MODEL = "__custom__";
 const ACCEPTED_FILES = ".pdf,.docx,.xlsx,.html,.htm,.csv,.txt,.md,.markdown,.mdx";
+const MarkdownAnswer = lazy(() => import("./MarkdownAnswer.jsx"));
 
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, options);
@@ -713,13 +714,22 @@ function Message({ prompt, answer }) {
         <div className="message-avatar assistant"><Sparkles size={14} /></div>
         <div className="message-content-wrapper">
           <div className="message-role-bar">
-            <div className="message-role">Quivr + MemPalace</div>
-            <button className="tts-button" type="button" onClick={handlePlay} disabled={isLoadingAudio} aria-label="Play response">
-              {isLoadingAudio ? <LoaderCircle className="spin" size={13} /> : isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
-              {isPlaying ? " Stop" : isLoadingAudio ? " Loading..." : " Listen"}
-            </button>
+            <div className="assistant-title-group">
+              <div className="message-role">Quivr + MemPalace</div>
+              <span className="answer-badge"><Check size={11} /> Grounded response</span>
+            </div>
+            <div className="answer-actions">
+              <button className="tts-button" type="button" onClick={handlePlay} disabled={isLoadingAudio} aria-label="Play response">
+                {isLoadingAudio ? <LoaderCircle className="spin" size={13} /> : isPlaying ? <Square size={13} /> : <Volume2 size={13} />}
+                {isPlaying ? " Stop" : isLoadingAudio ? " Loading..." : " Listen"}
+              </button>
+            </div>
           </div>
-          <div className="message-text answer-text">{answer}</div>
+          <div className="message-text answer-text markdown-content" aria-label="Assistant answer">
+            <Suspense fallback={<div className="markdown-loading">Formatting answer…</div>}>
+              <MarkdownAnswer answer={answer} />
+            </Suspense>
+          </div>
           {audioError && <div className="audio-error" role="status">{audioError}</div>}
         </div>
       </div>
