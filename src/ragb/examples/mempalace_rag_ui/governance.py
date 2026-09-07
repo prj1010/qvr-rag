@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import logging
 import os
 from collections import deque
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ DEFAULT_AUDIT_PATH = APP_DIR / "data" / "agent-rag-audit.jsonl"
 _RUNTIME_LOCK = Lock()
 _RUNTIME: GovernanceRuntime | None = None
 _RUNTIME_ERROR: str | None = None
+LOGGER = logging.getLogger(__name__)
 
 
 def _csv_setting(name: str, default: str = "") -> list[str]:
@@ -46,6 +48,12 @@ def _int_setting(name: str, default: int) -> int:
         return int(raw)
     except ValueError as exc:
         raise RuntimeError(f"{name} must be an integer.") from exc
+
+
+def enforcement_required() -> bool:
+    """Whether governance initialization errors should stop the chatbot."""
+
+    return _bool_setting("AGT_ENFORCEMENT_REQUIRED", False)
 
 
 def _package_version(distribution: str) -> str | None:
@@ -119,7 +127,7 @@ def _create_runtime() -> GovernanceRuntime:
 
 
 def get_runtime() -> GovernanceRuntime:
-    """Return the process-wide governance runtime, failing closed if absent."""
+    """Return the process-wide governance runtime or raise its initialization error."""
 
     global _RUNTIME, _RUNTIME_ERROR
     if _RUNTIME is not None:
@@ -188,10 +196,28 @@ class GovernedVectorStoreProxy:
         return getattr(self._vector_store, name)
 
 
-def apply_governance(brain: Any) -> GovernanceRuntime:
-    """Attach AGT to a Brain before Quivr can construct its RAG graph."""
+def apply_governance(brain: Any) -> GovernanceRuntime | None:
+    """Attach AGT without making optional governance a chatbot dependency.
 
-    runtime = get_runtime()
+    A missing or misconfigured toolkit is reported to the admin console and
+    leaves the original vector store untouched by default. Once a runtime is
+    active, policy decisions remain enforced and are never silently bypassed.
+    Set ``AGT_ENFORCEMENT_REQUIRED=true`` to fail closed during indexing when
+    the toolkit itself cannot initialize.
+    """
+
+    try:
+        runtime = get_runtime()
+    except RuntimeError as exc:
+        if enforcement_required():
+            raise
+        LOGGER.warning(
+            "Agent Governance Toolkit unavailable; continuing without the optional "
+            "retrieval wrapper: %s",
+            exc,
+        )
+        return None
+
     if not isinstance(getattr(brain, "vector_db", None), GovernedVectorStoreProxy):
         brain.vector_db = GovernedVectorStoreProxy(brain.vector_db, runtime)
     return runtime

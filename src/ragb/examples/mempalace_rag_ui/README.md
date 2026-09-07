@@ -89,8 +89,10 @@ The Microsoft Agent Governance Toolkit fork is installed by the app
 `requirements.txt` at a pinned commit. The admin-only **Agent governance**
 panel displays collection access, rate limits, content scanners, privacy-safe
 audit events, and a dry-run policy evaluator. Set the `AGT_*` variables in
-`.env` to change the policy; indexing fails closed if the governance package
-cannot be loaded.
+`.env` to change the policy. Governance attaches best-effort by default, so a
+toolkit outage does not interrupt the chatbot; active collection/content policy
+denials still block retrieval. Set `AGT_ENFORCEMENT_REQUIRED=true` when strict
+fail-closed indexing is required.
 
 For temporary access before Microsoft SSO is configured, set
 `ADMIN_FALLBACK_ENABLED=true` and a random `ADMIN_FALLBACK_TOKEN` of at least

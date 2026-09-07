@@ -368,6 +368,11 @@ synchronous `invoke` method in a threadpool when its internal async graph asks
 for documents; this preserves governance while keeping the FastAPI event loop
 responsive.
 
+Governance is attached best-effort by default so a toolkit initialization
+problem does not interrupt the chatbot or document indexing. Once governance is
+active, explicit policy denials are still enforced. Set
+`AGT_ENFORCEMENT_REQUIRED=true` to make initialization failures fail closed.
+
 Configure the policy with `AGT_*` variables in `.env` or Render. In production,
 keep `AGENT_RAG_AUDIT_SALT` secret, use a durable audit sink if audit history
 must survive restarts, and set an explicit `AGT_ALLOWED_COLLECTIONS` list. The

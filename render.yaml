@@ -18,7 +18,7 @@ services:
       pip install -r requirements.txt
       python -c "from quivr_core import Brain; print('quivr_core import OK')"
       python -c "from agent_rag_governance import RAGGovernor, RAGPolicy; from importlib.metadata import version; print('Agent Governance Toolkit import OK', version('agent-governance-toolkit-core'), version('agent-rag-governance'))"
-      python -c "from governance import governance_snapshot; status = governance_snapshot(); assert status['enabled'], status; print('RAG governance runtime OK')"
+      python -c "from governance import governance_snapshot; print('RAG governance status:', governance_snapshot())"
       python -c "import langchain_openai, markitdown, olgadoc, sqlite_vec; print('Model providers, Olga, MarkItDown, and sqlite-vec import OK')"
       python -c "import docling, onnxruntime, rapidocr, scipy, torch, torchvision; from ocr import _docling_converter; _docling_converter(); print('Docling Slim/RapidOCR CPU converter OK', torch.__version__, torchvision.__version__)"
       KOKORO_MODELS_DIR=models KOKORO_MODEL_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx KOKORO_MODEL_FILENAME=kokoro-v1.0.int8.onnx KOKORO_VOICES_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin KOKORO_VOICES_FILENAME=voices-v1.0.bin python -c "from app import _ensure_kokoro_models; _ensure_kokoro_models()"
@@ -96,6 +96,8 @@ services:
         value: block_pii,block_injections
       - key: AGT_AUDIT_ENABLED
         value: "true"
+      - key: AGT_ENFORCEMENT_REQUIRED
+        value: "false"
       - key: AGT_AUDIT_LOG_PATH
         value: /tmp/agent-rag-audit.jsonl
       - key: AGENT_RAG_AUDIT_SALT
