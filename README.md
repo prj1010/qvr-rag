@@ -12,8 +12,8 @@ models and provides a modern animated knowledge workspace.
 - MemPalace memory recall and persistence
 - Groq LLM support
 - NVIDIA NIM LLM and embedding support
-- PDF, DOCX, CSV, TXT, and Markdown files
-- MarkItDown document parsing without a local OCR binary
+- PDF, DOCX, XLSX, HTML, CSV, TXT, and Markdown files
+- Olga native document parsing with Docling/RapidOCR fallback for scanned PDFs
 - SQLite-backed vector search for lower RAM usage
 - Motion-powered glass, glow, spotlight, and bento-style UI
 - Local Windows CMD setup scripts
@@ -29,7 +29,8 @@ FastAPI application API
         +-- Quivr Core document RAG
         +-- MemPalace long-term memory
         +-- Groq or NVIDIA NIM
-        +-- MarkItDown parsing + optional cloud OCR for scanned PDFs
+        +-- Olga native parsing + MarkItDown compatibility parsing
+        +-- Docling/RapidOCR or optional cloud OCR for scanned PDFs
 ```
 
 ## Requirements
@@ -38,7 +39,7 @@ FastAPI application API
 - Python 3.12
 - Node.js 20 or newer
 - `uv`
-- MarkItDown with only the PDF and DOCX extras used by this app
+- Olga, MarkItDown, and Docling/RapidOCR document parsing dependencies
 - `sqlite-vec` for disk-backed cosine vector search
 
 ## Project structure
@@ -174,7 +175,7 @@ http://127.0.0.1:5173
 ## Using the application
 
 1. Select Groq or NVIDIA NIM.
-2. Upload PDF, DOCX, CSV, TXT, or Markdown files.
+2. Upload PDF, DOCX, XLSX, HTML, CSV, TXT, or Markdown files.
 3. Click **Index documents**.
 4. Ask questions about the uploaded sources.
 5. Use **Recall memory** to inspect MemPalace context.
@@ -182,13 +183,11 @@ http://127.0.0.1:5173
 
 ## Document parsing and OCR
 
-PDF, DOCX, CSV, TXT, and Markdown uploads are converted to compact Markdown by
-Microsoft MarkItDown. This keeps the service free of Tesseract, RapidOCR, and
-Megaparse/NATS runtime dependencies. Text-based PDFs and PDFs that already have
-an OCR text layer work locally; scanned image-only PDFs are rejected with a
-clear message and should be sent through a managed OCR service such as Azure
-Document Intelligence, or an explicitly configured MarkItDown vision OCR
-plugin.
+Native-text PDF, DOCX, XLSX, and HTML uploads are converted to page-preserving
+Markdown by Olga. CSV, TXT, and Markdown files continue through MarkItDown.
+Olga detects scanned/image-only PDFs and routes them to local Docling/RapidOCR;
+RapidOCR does not require Tesseract. The optional DocStrange cloud route remains
+disabled by default and can be enabled when a managed OCR fallback is needed.
 
 Uploads are streamed to temporary files and bounded by `MAX_UPLOAD_*` settings;
 parsed text is bounded by `MAX_PARSED_*` settings before chunking and embedding.

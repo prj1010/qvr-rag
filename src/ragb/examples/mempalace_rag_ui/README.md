@@ -69,9 +69,10 @@ publish_package.cmd
 ```
 
 1. Choose Groq or NVIDIA NIM.
-2. Upload PDF, DOCX, CSV, TXT, or Markdown documents.
-3. Click **Index documents**. MarkItDown parses supported files locally, so a
-   Megaparse/NATS server or Tesseract installation is not required.
+2. Upload PDF, DOCX, XLSX, HTML, CSV, TXT, or Markdown documents.
+3. Click **Index documents**. Olga parses native-text PDF, DOCX, XLSX, and HTML
+   files locally; MarkItDown covers CSV, text, Markdown, and parser fallback
+   cases. A Megaparse/NATS server or Tesseract installation is not required.
 4. Click **Recall memories** to test MemPalace alone.
 5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
 
@@ -93,17 +94,19 @@ indexing. Hosted embeddings require
 `NVIDIA_EMBEDDING_BASE_URL`. Set `NVIDIA_EMBEDDING_BATCH_SIZE` to tune request
 batching and `QUIVR_CHUNK_SIZE`/`QUIVR_CHUNK_OVERLAP` to tune chunking.
 
-MarkItDown converts PDF, DOCX, CSV, TXT, and Markdown files to compact Markdown.
-Text-based PDFs and PDFs with an existing OCR text layer work locally. When
-MarkItDown returns no text, scanned PDFs use local Docling OCR with the
+Olga is the first parser for native-text PDF, DOCX, XLSX, and HTML files. It
+preserves page boundaries in Markdown and is loaded from the lightweight
+`olgadoc` Rust-backed Python package. Olga does not OCR scanned-only PDFs; its
+processability check routes those files to local Docling OCR with the
 lightweight `docling-slim[format-pdf,feat-ocr-rapidocr-onnx]` package. RapidOCR
 uses ONNX Runtime and does not require Tesseract. Docling is loaded lazily and
 conversions are serialized to keep memory use bounded on Render. The current
 Docling PDF pipeline also needs CPU-only PyTorch and Torchvision for device
 detection and image preprocessing; the Render build explicitly uses CPU wheels
-and does not install CUDA. The optional DocStrange cloud route is disabled by
-default; enable it explicitly with `DOCSTRANGE_FALLBACK_ENABLED=true` if a
-provider fallback is needed.
+and does not install CUDA. MarkItDown remains the parser for CSV, text, and
+Markdown files and provides fallback coverage for PDF/DOCX. The optional
+DocStrange cloud route is disabled by default; enable it explicitly with
+`DOCSTRANGE_FALLBACK_ENABLED=true` if a provider fallback is needed.
 Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
 the extra in-process FAISS index. Use a persistent pgvector or managed vector
 service for production durability.

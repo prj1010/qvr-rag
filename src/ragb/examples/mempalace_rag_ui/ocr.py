@@ -1,4 +1,4 @@
-"""Local Docling OCR with an optional DocStrange cloud fallback."""
+"""Document parsing, local Docling OCR, and optional cloud OCR fallback."""
 
 from __future__ import annotations
 
@@ -10,6 +10,78 @@ from pathlib import Path
 
 
 DOCLING_CONVERSION_LOCK = Lock()
+
+
+class OlgaRequiresOcrError(RuntimeError):
+    """Raised when Olga identifies a document that needs an OCR stage."""
+
+
+def _open_olga_document(path: Path):
+    """Open a document with Olga while keeping the dependency lazy."""
+
+    try:
+        import olgadoc
+    except ImportError as exc:
+        raise RuntimeError(
+            "Olga document parsing is unavailable. Install olgadoc and restart."
+        ) from exc
+
+    try:
+        return olgadoc.Document.open(str(path))
+    except Exception as exc:
+        raise RuntimeError(f"Olga could not open {path.name}: {exc}") from exc
+
+
+def _olga_blocker_details(report: object) -> str:
+    blockers = getattr(report, "blockers", [])
+    details: list[str] = []
+    for blocker in blockers:
+        if isinstance(blocker, dict):
+            details.append(str(blocker.get("kind", blocker)))
+        else:
+            details.append(str(getattr(blocker, "kind", blocker)))
+    return ", ".join(details) or "native text is unavailable"
+
+
+def extract_olga_text(path: Path) -> str:
+    """Extract page-preserving Markdown with Olga for native documents.
+
+    Olga intentionally does not OCR scanned-only PDFs. Those files raise
+    ``OlgaRequiresOcrError`` so the caller can route them to Docling RapidOCR.
+    """
+
+    document = _open_olga_document(path)
+    report = document.processability()
+    is_blocked = getattr(report, "is_blocked", None)
+    blocked = bool(is_blocked()) if callable(is_blocked) else not bool(
+        getattr(document, "is_processable", True)
+    )
+    if blocked:
+        message = (
+            f"Olga found no native text in {path.name}; "
+            f"({_olga_blocker_details(report)})."
+        )
+        if path.suffix.lower() == ".pdf":
+            raise OlgaRequiresOcrError(f"{message} OCR is required.")
+        raise RuntimeError(f"{message} An alternate parser is required.")
+
+    try:
+        page_markdown = document.markdown_by_page()
+        if isinstance(page_markdown, dict):
+            sections = [
+                f"<!-- page {page_number} -->\n{content.strip()}"
+                for page_number, content in sorted(page_markdown.items())
+                if isinstance(content, str) and content.strip()
+            ]
+            markdown = "\n\n".join(sections)
+        else:
+            markdown = document.markdown()
+    except Exception as exc:
+        raise RuntimeError(f"Olga could not extract {path.name}: {exc}") from exc
+
+    if isinstance(markdown, str) and markdown.strip():
+        return markdown
+    raise RuntimeError(f"Olga returned no text for {path.name}.")
 
 
 def docstrange_fallback_enabled() -> bool:

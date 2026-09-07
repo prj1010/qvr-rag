@@ -30,10 +30,12 @@ from admin_auth import ADMIN_AUTH
 from governance import apply_governance, evaluate_governance, governance_snapshot
 from observability import OBSERVABILITY, content_metadata
 from ocr import (
+    OlgaRequiresOcrError,
     docstrange_configured,
     docstrange_fallback_enabled,
     extract_docling_text,
     extract_docstrange_text,
+    extract_olga_text,
 )
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
@@ -45,6 +47,7 @@ from sqlite_vector_store import SQLiteVecStore
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_PALACE = "~/.mempalace/palace"
 LOCAL_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".mdx"}
+SUPPORTED_OLGA_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".html", ".htm"}
 SUPPORTED_MARKITDOWN_EXTENSIONS = {".pdf", ".docx", ".csv", *LOCAL_TEXT_EXTENSIONS}
 DEFAULT_MAX_UPLOAD_FILES = 10
 DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -206,6 +209,17 @@ def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
             raise RuntimeError(
                 f"No text could be extracted from {path.name} with MarkItDown."
             )
+    return _document_from_markdown(path, metadata, markdown, parser_name)
+
+
+def _document_from_markdown(
+    path: Path,
+    metadata: dict[str, Any],
+    markdown: object,
+    parser_name: str,
+) -> Document:
+    """Validate parser output and apply the shared document-size limit."""
+
     if not isinstance(markdown, str) or not markdown.strip():
         raise RuntimeError(f"No text could be extracted from {path.name}.")
     max_chars = _positive_int_setting(
@@ -217,6 +231,20 @@ def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
             f"parsed-document limit is {max_chars}."
         )
     return Document(page_content=markdown, metadata={**metadata, "parser": parser_name})
+
+
+def _load_olga_document(path: Path, metadata: dict[str, Any]) -> Document:
+    """Parse a native-text document with Olga and preserve page boundaries."""
+
+    try:
+        markdown = extract_olga_text(path)
+    except OlgaRequiresOcrError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not parse {path.name} with Olga: {type(exc).__name__}: {exc}"
+        ) from exc
+    return _document_from_markdown(path, metadata, markdown, "olga")
 
 
 def _load_local_documents(file_paths: list[str]) -> list[Document]:
@@ -237,20 +265,41 @@ def _load_local_documents(file_paths: list[str]) -> list[Document]:
             "original_file_name": path.name,
         }
 
-        if suffix in SUPPORTED_MARKITDOWN_EXTENSIONS:
+        if suffix in SUPPORTED_OLGA_EXTENSIONS:
+            try:
+                document = _load_olga_document(path, metadata)
+            except OlgaRequiresOcrError:
+                if suffix != ".pdf":
+                    raise
+                # Olga correctly identifies scanned PDFs but does not OCR them.
+                # Reuse the existing PDF fallback chain, which tries MarkItDown,
+                # then local Docling RapidOCR, then optional DocStrange.
+                document = _load_markitdown_document(path, metadata)
+            except Exception as olga_error:
+                if suffix not in SUPPORTED_MARKITDOWN_EXTENSIONS:
+                    raise
+                try:
+                    document = _load_markitdown_document(path, metadata)
+                except Exception as fallback_error:
+                    raise RuntimeError(
+                        f"Olga failed for {path.name}: {olga_error}; "
+                        f"MarkItDown fallback failed: {fallback_error}"
+                    ) from fallback_error
+        elif suffix in SUPPORTED_MARKITDOWN_EXTENSIONS:
             document = _load_markitdown_document(path, metadata)
-            total_chars += len(document.page_content)
-            if total_chars > max_total_chars:
-                raise RuntimeError(
-                    "The uploaded documents exceed the configured parsed-text "
-                    f"limit of {max_total_chars} characters."
-                )
-            documents.append(document)
-            continue
+        else:
+            raise ValueError(
+                f"Unsupported file type: {path.name}. Use PDF, DOCX, XLSX, HTML, "
+                "CSV, TXT, or Markdown."
+            )
 
-        raise ValueError(
-            f"Unsupported file type: {path.name}. Use PDF, DOCX, CSV, TXT, or Markdown."
-        )
+        total_chars += len(document.page_content)
+        if total_chars > max_total_chars:
+            raise RuntimeError(
+                "The uploaded documents exceed the configured parsed-text "
+                f"limit of {max_total_chars} characters."
+            )
+        documents.append(document)
 
     if not documents:
         raise ValueError(

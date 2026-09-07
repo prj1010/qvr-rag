@@ -58,7 +58,7 @@ if errorlevel 1 exit /b 1
 echo Installing document parsing and TTS dependencies...
 uv pip install --python "%PY%" --index-url https://download.pytorch.org/whl/cpu "torch>=2.2,<3" "torchvision>=0.17,<1"
 if errorlevel 1 exit /b 1
-uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "markitdown[pdf,docx]>=0.1,<1" "docling-slim[format-pdf,feat-ocr-rapidocr-onnx]>=2.121,<3" "scipy>=1.6,<2" "rtree>=1.3,<2" "httpx>=0.27,<1" "sqlite-vec>=0.1.9,<0.2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
+uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "olgadoc>=0.1.3,<0.2" "markitdown[pdf,docx]>=0.1,<1" "docling-slim[format-pdf,feat-ocr-rapidocr-onnx]>=2.121,<3" "scipy>=1.6,<2" "rtree>=1.3,<2" "httpx>=0.27,<1" "sqlite-vec>=0.1.9,<0.2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
 if errorlevel 1 exit /b 1
 
 echo Applying compatible dependency pins...

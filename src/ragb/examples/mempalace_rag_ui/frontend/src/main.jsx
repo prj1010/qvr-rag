@@ -42,7 +42,7 @@ const MODELS = {
   "NVIDIA NIM": "nvidia/nemotron-3-super-120b-a12b",
 };
 
-const ACCEPTED_FILES = ".pdf,.docx,.csv,.txt,.md,.markdown,.mdx";
+const ACCEPTED_FILES = ".pdf,.docx,.xlsx,.html,.htm,.csv,.txt,.md,.markdown,.mdx";
 
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, options);
@@ -317,7 +317,7 @@ function App() {
                 <input ref={inputRef} type="file" multiple accept={ACCEPTED_FILES} onChange={(event) => addFiles(event.target.files)} />
                 <div className="upload-orb"><UploadCloud size={24} /></div>
                 <div className="dropzone-title">Drop your sources here</div>
-                <div className="dropzone-subtitle">PDF, DOCX, CSV, TXT, or Markdown · up to your imagination</div>
+                <div className="dropzone-subtitle">PDF, DOCX, XLSX, HTML, CSV, TXT, or Markdown · up to your imagination</div>
                 <button className="secondary-button" type="button" onClick={(event) => { event.stopPropagation(); inputRef.current?.click(); }}><Plus size={16} /> Browse files</button>
               </div>
               <AnimatePresence initial={false}>

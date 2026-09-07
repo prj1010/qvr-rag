@@ -5,10 +5,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ocr import (
+    OlgaRequiresOcrError,
     docstrange_configured,
     docstrange_fallback_enabled,
     extract_docling_text,
     extract_docstrange_text,
+    extract_olga_text,
 )
 
 
@@ -56,6 +58,37 @@ class _FakeDoclingConverter:
         return _FakeDoclingConversion()
 
 
+class _FakeOlgaReport:
+    blockers = []
+
+    def is_blocked(self):
+        return False
+
+
+class _FakeOlgaDocument:
+    is_processable = True
+
+    def processability(self):
+        return _FakeOlgaReport()
+
+    def markdown_by_page(self):
+        return {2: "Second page", 1: "First page"}
+
+
+class _FakeBlockedOlgaReport:
+    blockers = [{"kind": "EmptyContent"}]
+
+    def is_blocked(self):
+        return True
+
+
+class _FakeBlockedOlgaDocument:
+    is_processable = False
+
+    def processability(self):
+        return _FakeBlockedOlgaReport()
+
+
 class OcrTests(unittest.TestCase):
     def test_docstrange_requires_api_key(self) -> None:
         with patch.dict(
@@ -91,6 +124,22 @@ class OcrTests(unittest.TestCase):
             self.assertEqual(
                 extract_docling_text(path), "Docling OCR extracted text"
             )
+
+    def test_extract_olga_text_preserves_page_boundaries(self) -> None:
+        path = Path.cwd() / "test-olga.pdf"
+        with patch("ocr._open_olga_document", return_value=_FakeOlgaDocument()):
+            self.assertEqual(
+                extract_olga_text(path),
+                "<!-- page 1 -->\nFirst page\n\n<!-- page 2 -->\nSecond page",
+            )
+
+    def test_extract_olga_text_routes_scanned_documents_to_ocr(self) -> None:
+        path = Path.cwd() / "test-olga-scan.pdf"
+        with patch(
+            "ocr._open_olga_document", return_value=_FakeBlockedOlgaDocument()
+        ):
+            with self.assertRaisesRegex(OlgaRequiresOcrError, "EmptyContent"):
+                extract_olga_text(path)
 
     def test_docstrange_fallback_is_opt_in(self) -> None:
         with patch.dict(os.environ, {"DOCSTRANGE_FALLBACK_ENABLED": "false"}):
