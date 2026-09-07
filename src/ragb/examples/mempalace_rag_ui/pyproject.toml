@@ -13,6 +13,7 @@ dependencies = [
     "quivr-mempalace>=0.1.0",
     "agent-governance-toolkit-core[full] @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-governance-toolkit-core ; sys_platform == 'linux'",
     "agent-rag-governance @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-rag-governance",
+    "docstrange>=1.1,<2",
     "fastapi>=0.115,<1",
     "authlib>=1.3,<2",
     "itsdangerous>=2.2,<3",
@@ -40,7 +41,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "admin_auth", "observability", "governance"]
+py-modules = ["app", "admin_auth", "observability", "governance", "ocr"]
 include-package-data = true
 
 [tool.setuptools.packages.find]

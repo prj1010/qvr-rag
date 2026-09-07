@@ -29,6 +29,7 @@ import uvicorn
 from admin_auth import ADMIN_AUTH
 from governance import apply_governance, evaluate_governance, governance_snapshot
 from observability import OBSERVABILITY, content_metadata
+from ocr import docstrange_configured, extract_docstrange_text
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
@@ -166,16 +167,29 @@ def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
         ) from exc
 
     markdown = getattr(result, "markdown", None) or getattr(result, "text_content", "")
+    parser_name = "markitdown"
     if not isinstance(markdown, str) or not markdown.strip():
-        extra = (
-            " Scanned PDFs need a cloud OCR provider such as Azure Document "
-            "Intelligence or the MarkItDown OCR vision plugin."
-            if path.suffix.lower() == ".pdf"
-            else ""
-        )
-        raise RuntimeError(
-            f"No text could be extracted from {path.name} with MarkItDown.{extra}"
-        )
+        if path.suffix.lower() == ".pdf" and docstrange_configured():
+            try:
+                markdown = extract_docstrange_text(path)
+                parser_name = "docstrange-cloud"
+            except Exception as exc:
+                raise RuntimeError(
+                    f"MarkItDown found no text in {path.name}, and DocStrange OCR failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+        else:
+            extra = (
+                " Scanned PDFs need OCR. Configure "
+                "DOCSTRANGE_API_KEY for DocStrange cloud OCR."
+                if path.suffix.lower() == ".pdf"
+                else ""
+            )
+            raise RuntimeError(
+                f"No text could be extracted from {path.name} with MarkItDown.{extra}"
+            )
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise RuntimeError(f"No text could be extracted from {path.name}.")
     max_chars = _positive_int_setting(
         "MAX_PARSED_DOCUMENT_CHARS", DEFAULT_MAX_PARSED_DOCUMENT_CHARS
     )
@@ -184,7 +198,7 @@ def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
             f"{path.name} produced {len(markdown)} characters; the configured "
             f"parsed-document limit is {max_chars}."
         )
-    return Document(page_content=markdown, metadata={**metadata, "parser": "markitdown"})
+    return Document(page_content=markdown, metadata={**metadata, "parser": parser_name})
 
 
 def _load_local_documents(file_paths: list[str]) -> list[Document]:
