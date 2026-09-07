@@ -9,6 +9,8 @@ from ocr import docstrange_configured, extract_docstrange_text
 
 class _FakeResponse:
     status_code = 200
+    headers = {}
+    text = ""
 
     def raise_for_status(self):
         pass
@@ -37,10 +39,17 @@ class OcrTests(unittest.TestCase):
     def test_docstrange_requires_api_key(self) -> None:
         with patch.dict(
             os.environ,
-            {"DOCSTRANGE_API_KEY": ""},
+            {"DOCSTRANGE_API_KEY": "", "NANONETS_API_KEY": ""},
             clear=False,
         ):
             self.assertFalse(docstrange_configured())
+
+        with patch.dict(
+            os.environ,
+            {"DOCSTRANGE_API_KEY": "", "NANONETS_API_KEY": "legacy-key"},
+            clear=False,
+        ):
+            self.assertTrue(docstrange_configured())
 
     def test_extract_docstrange_text_uses_cloud_extractor(self) -> None:
         path = Path.cwd() / "test-ocr-scan.pdf"

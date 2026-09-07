@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
+
+
+def _docstrange_api_key() -> str:
+    """Read the current and legacy Nanonets API-key environment names."""
+
+    return (
+        os.getenv("DOCSTRANGE_API_KEY", "").strip()
+        or os.getenv("NANONETS_API_KEY", "").strip()
+    )
 
 
 def docstrange_configured() -> bool:
     """Return whether the DocStrange cloud API key is present."""
 
-    return bool(os.getenv("DOCSTRANGE_API_KEY", "").strip())
+    return bool(_docstrange_api_key())
 
 
 def extract_docstrange_text(path: Path) -> str:
@@ -19,10 +29,11 @@ def extract_docstrange_text(path: Path) -> str:
     heavyweight local OCR/model dependencies from the DocStrange package.
     """
 
-    api_key = os.getenv("DOCSTRANGE_API_KEY", "").strip()
+    api_key = _docstrange_api_key()
     if not api_key:
         raise RuntimeError(
-            "Set DOCSTRANGE_API_KEY to OCR scanned documents with DocStrange."
+            "Set DOCSTRANGE_API_KEY (or NANONETS_API_KEY) to OCR scanned "
+            "documents with DocStrange."
         )
 
     try:
@@ -38,23 +49,39 @@ def extract_docstrange_text(path: Path) -> str:
         "https://extraction-api.nanonets.com/extract",
     ).strip()
     try:
-        with path.open("rb") as document:
-            response = httpx.post(
-                api_url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                files={
-                    "file": (
-                        path.name,
-                        document,
-                        "application/pdf",
-                    )
-                },
-                data={"output_type": "markdown"},
-                timeout=httpx.Timeout(300.0, connect=30.0),
-            )
+        response = None
+        for attempt in range(3):
+            with path.open("rb") as document:
+                response = httpx.post(
+                    api_url,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={
+                        "file": (
+                            path.name,
+                            document,
+                            "application/pdf",
+                        )
+                    },
+                    data={"output_type": "markdown"},
+                    timeout=httpx.Timeout(300.0, connect=30.0),
+                )
+            if response.status_code != 429 or attempt == 2:
+                break
+
+            retry_after = response.headers.get("retry-after", "")
+            try:
+                delay = max(1.0, min(float(retry_after), 15.0))
+            except ValueError:
+                delay = float(2**attempt)
+            time.sleep(delay)
+
+        assert response is not None
         if response.status_code == 429:
+            detail = response.text.strip().replace("\n", " ")[:240]
+            retry_after = response.headers.get("retry-after", "unknown")
             raise RuntimeError(
-                "DocStrange rate limit reached. Check the API plan or try again later."
+                "DocStrange rate limit reached after 3 attempts "
+                f"(Retry-After: {retry_after}). {detail or 'Check the API plan and quota.'}"
             )
         response.raise_for_status()
         payload = response.json()
