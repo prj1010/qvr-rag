@@ -1,10 +1,82 @@
-"""Optional DocStrange cloud OCR integration for image-only documents."""
+"""Local Docling OCR with an optional DocStrange cloud fallback."""
 
 from __future__ import annotations
 
+from functools import lru_cache
 import os
+from threading import Lock
 import time
 from pathlib import Path
+
+
+DOCLING_CONVERSION_LOCK = Lock()
+
+
+def docstrange_fallback_enabled() -> bool:
+    """Return whether the legacy cloud OCR fallback was explicitly enabled."""
+
+    return os.getenv("DOCSTRANGE_FALLBACK_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@lru_cache(maxsize=1)
+def _docling_converter():
+    """Build one small, CPU-only Docling converter for scanned PDFs.
+
+    Imports and model initialization stay lazy so normal text documents do not
+    pay the Docling startup or memory cost.
+    """
+
+    try:
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.pipeline_options import (
+            OcrMode,
+            PdfPipelineOptions,
+            RapidOcrOptions,
+        )
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+    except ImportError as exc:
+        raise RuntimeError(
+            "Docling OCR is not installed. Install "
+            "docling-slim[format-pdf,feat-ocr-rapidocr-onnx] and restart."
+        ) from exc
+
+    pipeline_options = PdfPipelineOptions(
+        do_ocr=True,
+        do_table_structure=False,
+        ocr_options=RapidOcrOptions(
+            lang=[os.getenv("DOCLING_OCR_LANG", "en").strip() or "en"],
+            mode=OcrMode.FULL_PAGE,
+        ),
+    )
+    return DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+        }
+    )
+
+
+def extract_docling_text(path: Path) -> str:
+    """Extract structured Markdown from a scanned PDF with local Docling OCR."""
+
+    try:
+        with DOCLING_CONVERSION_LOCK:
+            conversion = _docling_converter().convert(path)
+            markdown = conversion.document.export_to_markdown(
+                traverse_pictures=True
+            )
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"Docling OCR request failed: {exc}") from exc
+
+    if isinstance(markdown, str) and markdown.strip():
+        return markdown
+    raise RuntimeError(f"Docling returned no text for {path.name}.")
 
 
 def _docstrange_api_key() -> str:

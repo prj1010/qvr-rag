@@ -12,7 +12,7 @@ python-multipart>=0.0.20,<1
 authlib>=1.3,<2
 itsdangerous>=2.2,<3
 
-# --- Optional cloud OCR HTTP client for image-only PDFs ---
+# --- Optional cloud OCR HTTP client for the explicit DocStrange fallback ---
 httpx>=0.27,<1
 
 # --- LangChain core & providers ---
@@ -42,6 +42,9 @@ numpy>=1.26,<3
 # --- Document parsing ---
 # Install only the format-specific MarkItDown extras used by this UI.
 markitdown[pdf,docx]>=0.1,<1
+# Docling is loaded lazily and used for scanned PDFs. RapidOCR avoids a
+# Tesseract system dependency; the upper bound protects the current API.
+docling-slim[format-pdf,feat-ocr-rapidocr-onnx]>=2.121,<3
 
 # --- Low-memory vector storage ---
 # SQLite-backed vectors replace Quivr's in-process FAISS default.

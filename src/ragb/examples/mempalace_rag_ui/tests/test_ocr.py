@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ocr import docstrange_configured, extract_docstrange_text
+from ocr import (
+    docstrange_configured,
+    docstrange_fallback_enabled,
+    extract_docling_text,
+    extract_docstrange_text,
+)
 
 
 class _FakeResponse:
@@ -35,6 +40,22 @@ class _FakeHttpx:
         return _FakeResponse()
 
 
+class _FakeDoclingDocument:
+    def export_to_markdown(self, *, traverse_pictures):
+        assert traverse_pictures is True
+        return "Docling OCR extracted text"
+
+
+class _FakeDoclingConversion:
+    document = _FakeDoclingDocument()
+
+
+class _FakeDoclingConverter:
+    def convert(self, path):
+        assert path.name == "test-ocr-scan.pdf"
+        return _FakeDoclingConversion()
+
+
 class OcrTests(unittest.TestCase):
     def test_docstrange_requires_api_key(self) -> None:
         with patch.dict(
@@ -61,6 +82,21 @@ class OcrTests(unittest.TestCase):
         ), patch.dict(sys.modules, {"httpx": _FakeHttpx}):
             path.write_bytes(b"pdf bytes")
             self.assertEqual(extract_docstrange_text(path), "OCR extracted text")
+
+    def test_extract_docling_text_uses_full_page_markdown(self) -> None:
+        path = Path.cwd() / "test-ocr-scan.pdf"
+        self.addCleanup(path.unlink, missing_ok=True)
+        with patch("ocr._docling_converter", return_value=_FakeDoclingConverter()):
+            path.write_bytes(b"pdf bytes")
+            self.assertEqual(
+                extract_docling_text(path), "Docling OCR extracted text"
+            )
+
+    def test_docstrange_fallback_is_opt_in(self) -> None:
+        with patch.dict(os.environ, {"DOCSTRANGE_FALLBACK_ENABLED": "false"}):
+            self.assertFalse(docstrange_fallback_enabled())
+        with patch.dict(os.environ, {"DOCSTRANGE_FALLBACK_ENABLED": "true"}):
+            self.assertTrue(docstrange_fallback_enabled())
 
 
 if __name__ == "__main__":

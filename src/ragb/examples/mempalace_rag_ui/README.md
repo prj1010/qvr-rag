@@ -94,15 +94,13 @@ indexing. Hosted embeddings require
 batching and `QUIVR_CHUNK_SIZE`/`QUIVR_CHUNK_OVERLAP` to tune chunking.
 
 MarkItDown converts PDF, DOCX, CSV, TXT, and Markdown files to compact Markdown.
-Text-based PDFs and PDFs with an existing OCR text layer work locally. Image-only
-  scanned PDFs use DocStrange cloud OCR when `DOCSTRANGE_API_KEY` is set. Add
-  that secret to `.env` locally or to Render. The app calls DocStrange only when
-  MarkItDown returns no text; text-based PDFs remain local. Without the key,
-  scanned PDFs fail with an actionable configuration message. This deployment
-  uses DocStrange's lightweight HTTP API adapter rather than its local OCR/model
-  package, and intentionally does not bundle Tesseract or RapidOCR. The API URL
-  defaults to the current `/api/v1/extract` endpoint and can be overridden with
-  `DOCSTRANGE_API_URL` if the provider changes it again.
+Text-based PDFs and PDFs with an existing OCR text layer work locally. When
+MarkItDown returns no text, scanned PDFs use local Docling OCR with the
+lightweight `docling-slim[format-pdf,feat-ocr-rapidocr-onnx]` package. RapidOCR
+uses ONNX Runtime and does not require Tesseract. Docling is loaded lazily and
+conversions are serialized to keep memory use bounded on Render. The optional
+DocStrange cloud route is disabled by default; enable it explicitly with
+`DOCSTRANGE_FALLBACK_ENABLED=true` if a provider fallback is needed.
 Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
 the extra in-process FAISS index. Use a persistent pgvector or managed vector
 service for production durability.

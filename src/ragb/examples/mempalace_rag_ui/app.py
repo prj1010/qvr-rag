@@ -29,7 +29,12 @@ import uvicorn
 from admin_auth import ADMIN_AUTH
 from governance import apply_governance, evaluate_governance, governance_snapshot
 from observability import OBSERVABILITY, content_metadata
-from ocr import docstrange_configured, extract_docstrange_text
+from ocr import (
+    docstrange_configured,
+    docstrange_fallback_enabled,
+    extract_docling_text,
+    extract_docstrange_text,
+)
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
@@ -169,24 +174,37 @@ def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
     markdown = getattr(result, "markdown", None) or getattr(result, "text_content", "")
     parser_name = "markitdown"
     if not isinstance(markdown, str) or not markdown.strip():
-        if path.suffix.lower() == ".pdf" and docstrange_configured():
+        if path.suffix.lower() == ".pdf":
+            docling_error: Exception | None = None
             try:
-                markdown = extract_docstrange_text(path)
-                parser_name = "docstrange-cloud"
+                markdown = extract_docling_text(path)
+                parser_name = "docling-rapidocr"
             except Exception as exc:
+                docling_error = exc
+
+            if (
+                (not isinstance(markdown, str) or not markdown.strip())
+                and docstrange_fallback_enabled()
+                and docstrange_configured()
+            ):
+                try:
+                    markdown = extract_docstrange_text(path)
+                    parser_name = "docstrange-cloud-fallback"
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"MarkItDown found no text in {path.name}; Docling OCR failed: "
+                        f"{type(docling_error).__name__}: {docling_error}; "
+                        f"DocStrange fallback failed: {type(exc).__name__}: {exc}"
+                    ) from exc
+
+            if not isinstance(markdown, str) or not markdown.strip():
                 raise RuntimeError(
-                    f"MarkItDown found no text in {path.name}, and DocStrange OCR failed: "
-                    f"{type(exc).__name__}: {exc}"
-                ) from exc
+                    f"MarkItDown found no text in {path.name}; Docling OCR failed: "
+                    f"{type(docling_error).__name__}: {docling_error}."
+                ) from docling_error
         else:
-            extra = (
-                " Scanned PDFs need OCR. Configure "
-                "DOCSTRANGE_API_KEY for DocStrange cloud OCR."
-                if path.suffix.lower() == ".pdf"
-                else ""
-            )
             raise RuntimeError(
-                f"No text could be extracted from {path.name} with MarkItDown.{extra}"
+                f"No text could be extracted from {path.name} with MarkItDown."
             )
     if not isinstance(markdown, str) or not markdown.strip():
         raise RuntimeError(f"No text could be extracted from {path.name}.")
@@ -236,7 +254,7 @@ def _load_local_documents(file_paths: list[str]) -> list[Document]:
 
     if not documents:
         raise ValueError(
-            "No text could be extracted. Scanned PDFs need a cloud OCR route."
+            "No text could be extracted. Scanned PDFs require Docling OCR."
         )
 
     try:
