@@ -56,7 +56,7 @@ uv pip install --python "%PY%" --upgrade "fastapi>=0.115,<1" "python-multipart>=
 if errorlevel 1 exit /b 1
 
 echo Installing low-memory document parsing and TTS dependencies...
-uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "markitdown[pdf,docx]>=0.1,<1" "docstrange>=1.1,<2" "sqlite-vec>=0.1.9,<0.2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
+uv pip install --python "%PY%" --upgrade "langchain-text-splitters>=0.3,<0.4" "markitdown[pdf,docx]>=0.1,<1" "httpx>=0.27,<1" "sqlite-vec>=0.1.9,<0.2" "kokoro-onnx>=0.6.1,<0.7" "soundfile>=0.12,<1" "numpy>=1.26,<3"
 if errorlevel 1 exit /b 1
 
 echo Applying compatible dependency pins...

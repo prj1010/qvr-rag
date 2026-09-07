@@ -12,8 +12,8 @@ python-multipart>=0.0.20,<1
 authlib>=1.3,<2
 itsdangerous>=2.2,<3
 
-# --- Optional cloud OCR for image-only PDFs ---
-docstrange>=1.1,<2
+# --- Optional cloud OCR HTTP client for image-only PDFs ---
+httpx>=0.27,<1
 
 # --- LangChain core & providers ---
 langchain-core>=0.3,<0.4

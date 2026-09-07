@@ -99,7 +99,8 @@ scanned PDFs use DocStrange cloud OCR when `DOCSTRANGE_API_KEY` is set. Add
 that secret to `.env` locally or to Render. The app calls DocStrange only when
 MarkItDown returns no text; text-based PDFs remain local. Without the key,
 scanned PDFs fail with an actionable configuration message. This deployment
-intentionally does not bundle Tesseract or RapidOCR.
+uses DocStrange's lightweight HTTP API adapter rather than its local OCR/model
+package, and intentionally does not bundle Tesseract or RapidOCR.
 Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
 the extra in-process FAISS index. Use a persistent pgvector or managed vector
 service for production durability.
