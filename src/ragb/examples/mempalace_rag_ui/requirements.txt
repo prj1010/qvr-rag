@@ -37,11 +37,12 @@ soundfile>=0.12,<1
 numpy>=1.26,<3
 
 # --- Document parsing ---
-pillow>=10,<13
-pymupdf>=1.24,<2          # PDF rendering for OCR
-pymupdf4llm>=1,<2         # Layout-aware PDF extraction and OCR dispatch
-rapidocr_onnxruntime>=1.2.3,<2  # System-Tesseract-free OCR backend
-python-docx>=1.1,<2       # DOCX support
+# Install only the format-specific MarkItDown extras used by this UI.
+markitdown[pdf,docx]>=0.1,<1
+
+# --- Low-memory vector storage ---
+# SQLite-backed vectors replace Quivr's in-process FAISS default.
+sqlite-vec>=0.1.9,<0.2
 
 # --- Observability ---
 langfuse>=2.57,<3

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import csv
+import gc
 import io
 import os
 import shutil
@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.request
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -21,9 +22,6 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.documents import Document
-from langchain_groq import ChatGroq
-from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 import uvicorn
@@ -35,11 +33,18 @@ from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
 from quivr_mempalace import MemoryAwareAssistant, MempalaceMemoryStore, load_environment
+from sqlite_vector_store import SQLiteVecStore
 
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_PALACE = "~/.mempalace/palace"
 LOCAL_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".mdx"}
+SUPPORTED_MARKITDOWN_EXTENSIONS = {".pdf", ".docx", ".csv", *LOCAL_TEXT_EXTENSIONS}
+DEFAULT_MAX_UPLOAD_FILES = 10
+DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+DEFAULT_MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024
+DEFAULT_MAX_PARSED_DOCUMENT_CHARS = 5_000_000
+DEFAULT_MAX_PARSED_TOTAL_CHARS = 10_000_000
 
 
 @dataclass
@@ -53,6 +58,7 @@ class AppState:
 
 
 STATE = AppState()
+BRAIN_LOCK = Lock()
 KOKORO_INIT_LOCK = Lock()
 KOKORO_SYNTHESIS_SEMAPHORE = asyncio.Semaphore(1)
 
@@ -139,64 +145,58 @@ def get_kokoro():
     return STATE.kokoro
 
 
-def _load_pdf_documents(path: Path, metadata: dict[str, Any]) -> list[Document]:
-    """Extract text and layout-aware Markdown with PyMuPDF4LLM.
-
-    PyMuPDF4LLM uses native PDF text extraction for regular PDFs and invokes
-    RapidOCR only for pages that need OCR. This keeps Tesseract out of the
-    Render runtime while still supporting image-only PDFs.
-    """
-
+@lru_cache(maxsize=1)
+def _markitdown_converter() -> Any:
     try:
-        import pymupdf4llm
+        from markitdown import MarkItDown
     except ImportError as exc:
         raise RuntimeError(
-            "PDF support requires pymupdf4llm. Run setup.cmd again."
+            "Document parsing requires MarkItDown. Run setup.cmd again."
         ) from exc
+    return MarkItDown(enable_plugins=False)
 
-    try:
-        dpi = int(os.getenv("QUIVR_OCR_DPI", "150"))
-    except ValueError as exc:
-        raise ValueError("QUIVR_OCR_DPI must be an integer.") from exc
-    if dpi < 72 or dpi > 400:
-        raise ValueError("QUIVR_OCR_DPI must be between 72 and 400.")
 
-    use_ocr = os.getenv("QUIVR_PDF_USE_OCR", "true").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+def _load_markitdown_document(path: Path, metadata: dict[str, Any]) -> Document:
+    """Convert a supported upload to compact Markdown without local OCR."""
     try:
-        markdown = pymupdf4llm.to_markdown(
-            str(path),
-            use_ocr=use_ocr,
-            ocr_language=os.getenv("QUIVR_OCR_LANGUAGE", "eng"),
-            ocr_dpi=dpi,
-            show_progress=False,
-        )
+        result = _markitdown_converter().convert(str(path))
     except Exception as exc:
         raise RuntimeError(
-            f"Could not extract PDF text with PyMuPDF4LLM: {type(exc).__name__}: {exc}"
+            f"Could not parse {path.name} with MarkItDown: {type(exc).__name__}: {exc}"
         ) from exc
 
-    if not markdown.strip():
+    markdown = getattr(result, "markdown", None) or getattr(result, "text_content", "")
+    if not isinstance(markdown, str) or not markdown.strip():
+        extra = (
+            " Scanned PDFs need a cloud OCR provider such as Azure Document "
+            "Intelligence or the MarkItDown OCR vision plugin."
+            if path.suffix.lower() == ".pdf"
+            else ""
+        )
         raise RuntimeError(
-            f"No text could be extracted from {path.name}. Enable QUIVR_PDF_USE_OCR "
-            "or upload a text-based/OCR PDF."
+            f"No text could be extracted from {path.name} with MarkItDown.{extra}"
         )
-    return [
-        Document(
-            page_content=markdown,
-            metadata={**metadata, "parser": "pymupdf4llm", "ocr_enabled": use_ocr},
+    max_chars = _positive_int_setting(
+        "MAX_PARSED_DOCUMENT_CHARS", DEFAULT_MAX_PARSED_DOCUMENT_CHARS
+    )
+    if len(markdown) > max_chars:
+        raise RuntimeError(
+            f"{path.name} produced {len(markdown)} characters; the configured "
+            f"parsed-document limit is {max_chars}."
         )
-    ]
+    return Document(page_content=markdown, metadata={**metadata, "parser": "markitdown"})
 
 
 def _load_local_documents(file_paths: list[str]) -> list[Document]:
     """Read common document types locally without Megaparse/NATS."""
 
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     documents: list[Document] = []
+    max_total_chars = _positive_int_setting(
+        "MAX_PARSED_TOTAL_CHARS", DEFAULT_MAX_PARSED_TOTAL_CHARS
+    )
+    total_chars = 0
     for raw_path in file_paths:
         path = Path(raw_path)
         suffix = path.suffix.lower()
@@ -205,48 +205,15 @@ def _load_local_documents(file_paths: list[str]) -> list[Document]:
             "original_file_name": path.name,
         }
 
-        if suffix in LOCAL_TEXT_EXTENSIONS:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            if text.strip():
-                documents.append(Document(page_content=text, metadata=metadata))
-            continue
-
-        if suffix == ".csv":
-            with path.open(
-                "r", encoding="utf-8", errors="replace", newline=""
-            ) as handle:
-                rows = csv.reader(handle)
-                text = "\n".join(", ".join(row) for row in rows)
-            if text.strip():
-                documents.append(Document(page_content=text, metadata=metadata))
-            continue
-
-        if suffix == ".pdf":
-            documents.extend(_load_pdf_documents(path, metadata))
-            continue
-
-        if suffix == ".docx":
-            try:
-                from docx import Document as WordDocument
-            except ImportError as exc:
+        if suffix in SUPPORTED_MARKITDOWN_EXTENSIONS:
+            document = _load_markitdown_document(path, metadata)
+            total_chars += len(document.page_content)
+            if total_chars > max_total_chars:
                 raise RuntimeError(
-                    "DOCX support requires python-docx. Run setup.cmd again."
-                ) from exc
-
-            word_document = WordDocument(str(path))
-            parts = [
-                paragraph.text
-                for paragraph in word_document.paragraphs
-                if paragraph.text.strip()
-            ]
-            for table in word_document.tables:
-                parts.extend(
-                    ", ".join(cell.text for cell in row.cells)
-                    for row in table.rows
+                    "The uploaded documents exceed the configured parsed-text "
+                    f"limit of {max_total_chars} characters."
                 )
-            text = "\n".join(parts)
-            if text.strip():
-                documents.append(Document(page_content=text, metadata=metadata))
+            documents.append(document)
             continue
 
         raise ValueError(
@@ -255,7 +222,7 @@ def _load_local_documents(file_paths: list[str]) -> list[Document]:
 
     if not documents:
         raise ValueError(
-            "No text could be extracted. Scanned/image-only PDFs need OCR or Megaparse."
+            "No text could be extracted. Scanned PDFs need a cloud OCR route."
         )
 
     try:
@@ -305,11 +272,24 @@ def _required(name: str) -> str:
     return value
 
 
+def _positive_int_setting(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
 def _build_llm(provider: str, model_name: str) -> LLMEndpoint:
     _load_app_environment()
     model_name = model_name.strip() or _default_model(provider)
 
     if provider == "NVIDIA NIM":
+        from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
         api_key = os.getenv("NVIDIA_API_KEY", "").strip()
         base_url = os.getenv(
             "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
@@ -335,6 +315,8 @@ def _build_llm(provider: str, model_name: str) -> LLMEndpoint:
         config_key = api_key
         config_url = base_url
     else:
+        from langchain_groq import ChatGroq
+
         config_key = _required("GROQ_API_KEY")
         chat_model = ChatGroq(
             model=model_name,
@@ -356,7 +338,9 @@ def _build_llm(provider: str, model_name: str) -> LLMEndpoint:
     return LLMEndpoint(llm_config=config, llm=chat_model)
 
 
-def _build_embedder() -> NVIDIAEmbeddings:
+def _build_embedder() -> Any:
+    from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+
     _load_app_environment()
     api_key = os.getenv("NVIDIA_API_KEY", "").strip()
     base_url = os.getenv(
@@ -413,20 +397,35 @@ def index_documents(
             {"file_count": len(file_paths)},
         ):
             chunks = _load_local_documents(file_paths)
+        embedder = _build_embedder()
+        vector_path = Path(tempfile.gettempdir()) / f"quivr-vectors-{uuid4().hex}.sqlite3"
+        vector_store: SQLiteVecStore | None = None
         with OBSERVABILITY.span(
             "embeddings.index",
             "embedding",
             {"chunk_count": len(chunks), "provider": provider},
         ):
-            brain = asyncio.run(
-                Brain.afrom_langchain_documents(
-                    name=brain_name.strip() or "mempalace-quivr",
-                    langchain_documents=chunks,
-                    llm=llm,
-                    embedder=_build_embedder(),
+            try:
+                vector_store = SQLiteVecStore(vector_path, embedding=embedder)
+                brain = asyncio.run(
+                    Brain.afrom_langchain_documents(
+                        name=brain_name.strip() or "mempalace-quivr",
+                        langchain_documents=chunks,
+                        llm=llm,
+                        embedder=embedder,
+                        vector_db=vector_store,
+                    )
                 )
-            )
-            apply_governance(brain)
+                apply_governance(brain)
+            except Exception:
+                if vector_store is not None:
+                    vector_store.cleanup()
+                else:
+                    for suffix in ("", "-wal", "-shm"):
+                        vector_path.with_name(vector_path.name + suffix).unlink(
+                            missing_ok=True
+                        )
+                raise
         return brain, (
             f"Indexed {len(file_paths)} document(s) into {len(chunks)} local chunks "
             "with Quivr RAG."
@@ -734,15 +733,52 @@ def _index_documents_route(
 
     if not files:
         raise HTTPException(status_code=400, detail="Select at least one document.")
+    try:
+        max_files = _positive_int_setting("MAX_UPLOAD_FILES", DEFAULT_MAX_UPLOAD_FILES)
+        max_file_bytes = _positive_int_setting(
+            "MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES
+        )
+        max_total_bytes = _positive_int_setting(
+            "MAX_UPLOAD_TOTAL_BYTES", DEFAULT_MAX_UPLOAD_TOTAL_BYTES
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if len(files) > max_files:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload at most {max_files} files per indexing request.",
+        )
 
     with tempfile.TemporaryDirectory(prefix="quivr-mempalace-") as temp_dir:
         temp_root = Path(temp_dir)
         saved_paths: list[str] = []
         original_names: list[str] = []
+        total_bytes = 0
         for index, upload in enumerate(files, start=1):
             original_name = Path(upload.filename or f"upload-{index}.txt").name
             destination = temp_root / f"{index:03d}_{original_name}"
-            destination.write_bytes(upload.file.read())
+            file_bytes = 0
+            with destination.open("wb") as output:
+                while chunk := upload.file.read(1024 * 1024):
+                    file_bytes += len(chunk)
+                    total_bytes += len(chunk)
+                    if file_bytes > max_file_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=(
+                                f"{original_name} exceeds the {max_file_bytes} byte "
+                                "per-file upload limit."
+                            ),
+                        )
+                    if total_bytes > max_total_bytes:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=(
+                                f"The request exceeds the {max_total_bytes} byte "
+                                "total upload limit."
+                            ),
+                        )
+                    output.write(chunk)
             saved_paths.append(str(destination))
             original_names.append(original_name)
 
@@ -756,9 +792,24 @@ def _index_documents_route(
     if brain is None:
         return {"ok": False, "message": message}
 
-    STATE.brain = brain
-    STATE.indexed_files = original_names
-    STATE.indexed_chunks = _load_chunk_count(message)
+    # Swap only after the SQLite vector store is fully built. This avoids
+    # exposing a half-built index to readers.
+    with BRAIN_LOCK:
+        old_brain = STATE.brain
+        STATE.brain = brain
+        if old_brain is not None:
+            old_store = getattr(old_brain, "vector_db", None)
+            old_store = getattr(old_store, "_vector_store", old_store)
+            cleanup = getattr(old_store, "cleanup", None)
+            if callable(cleanup):
+                cleanup()
+            else:
+                close = getattr(old_store, "close", None)
+                if callable(close):
+                    close()
+        STATE.indexed_files = original_names
+        STATE.indexed_chunks = _load_chunk_count(message)
+    gc.collect()
     return {
         "ok": True,
         "message": message,
@@ -778,6 +829,25 @@ def _load_chunk_count(message: str) -> int:
             except ValueError:
                 break
     return 0
+
+
+def _answer_with_current_brain(
+    question: str,
+    history: list[list[str]] | None,
+    wing: str,
+    palace_path: str,
+    n_results: int,
+) -> tuple[list[list[str]], str, str, str]:
+    """Answer while holding the state lock so re-indexing cannot close the store."""
+    with BRAIN_LOCK:
+        return answer_question(
+            question,
+            history,
+            STATE.brain,
+            wing,
+            palace_path,
+            n_results,
+        )
 
 
 @app.post("/api/recall")
@@ -810,7 +880,9 @@ async def api_answer_question(request: AskRequest) -> dict[str, Any]:
             "n_results": request.n_results,
         },
     ) as trace:
-        if STATE.brain is None:
+        with BRAIN_LOCK:
+            brain_loaded = STATE.brain is not None
+        if not brain_loaded:
             return {
                 "ok": False,
                 "history": request.history,
@@ -820,10 +892,9 @@ async def api_answer_question(request: AskRequest) -> dict[str, Any]:
 
         with trace.span("rag.answer", "chain", {"history_turns": len(request.history)}):
             history, _, context, status = await run_in_threadpool(
-                answer_question,
+                _answer_with_current_brain,
                 request.question,
                 request.history,
-                STATE.brain,
                 request.wing,
                 request.palace_path,
                 request.n_results,

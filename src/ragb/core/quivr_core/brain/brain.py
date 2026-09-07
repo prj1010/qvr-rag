@@ -3,14 +3,13 @@ import logging
 import os
 from pathlib import Path
 from pprint import PrettyPrinter
-from typing import Any, AsyncGenerator, Callable, Dict, Self, Type, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Dict, Self, Type, Union
 from uuid import UUID, uuid4
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.vectorstores import VectorStore
-from langchain_openai import OpenAIEmbeddings
 from rich.console import Console
 from rich.panel import Panel
 
@@ -34,14 +33,16 @@ from quivr_core.rag.entities.models import (
     QuivrKnowledge,
     SearchResult,
 )
-from quivr_core.rag.quivr_rag import QuivrQARAG
-from quivr_core.rag.quivr_rag_langgraph import QuivrQARAGLangGraph
 from quivr_core.storage.local_storage import LocalStorage, TransparentStorage
 from quivr_core.storage.storage_base import StorageBase
 
 from .brain_defaults import build_default_vectordb, default_embedder, default_llm
 
 logger = logging.getLogger("quivr_core")
+
+if TYPE_CHECKING:
+    from quivr_core.rag.quivr_rag import QuivrQARAG
+    from quivr_core.rag.quivr_rag_langgraph import QuivrQARAGLangGraph
 
 
 async def process_files(
@@ -232,6 +233,8 @@ class Brain:
             vector_store = FAISSConfig(vectordb_folder_path=vectordb_path)
         else:
             raise Exception("can't serialize other vector stores for now")
+
+        from langchain_openai import OpenAIEmbeddings
 
         if isinstance(self.embedder, OpenAIEmbeddings):
             embedder_config = EmbedderConfig(
@@ -522,6 +525,8 @@ class Brain:
             print(chunk.answer)
         ```
         """
+        from quivr_core.rag.quivr_rag_langgraph import QuivrQARAGLangGraph
+
         llm = self.llm
 
         # If you passed a different llm model we'll override the brain  one

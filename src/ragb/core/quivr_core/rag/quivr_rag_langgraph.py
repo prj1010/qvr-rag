@@ -18,8 +18,6 @@ from uuid import UUID, uuid4
 
 import openai
 from langchain.retrievers import ContextualCompressionRetriever
-from langchain_cohere import CohereRerank
-from langchain_community.document_compressors import JinaRerank
 from langchain_core.callbacks import Callbacks
 from langchain_core.documents import BaseDocumentCompressor, Document
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -34,7 +32,6 @@ from langgraph.types import Send
 from pydantic import BaseModel, Field
 
 from quivr_core.llm import LLMEndpoint
-from quivr_core.llm_tools.llm_tools import LLMToolFactory
 from quivr_core.rag.entities.chat import ChatHistory
 from quivr_core.rag.entities.config import DefaultRerankers, NodeConfig, RetrievalConfig
 from quivr_core.rag.entities.models import (
@@ -287,10 +284,14 @@ class QuivrQARAGLangGraph:
         api_key = kwargs.pop("api_key", config.api_key)
 
         if supplier == DefaultRerankers.COHERE:
+            from langchain_cohere import CohereRerank
+
             reranker = CohereRerank(
                 model=model, top_n=top_n, cohere_api_key=api_key, **kwargs
             )
         elif supplier == DefaultRerankers.JINA:
+            from langchain_community.document_compressors import JinaRerank
+
             reranker = JinaRerank(
                 model=model, top_n=top_n, jina_api_key=api_key, **kwargs
             )
@@ -504,7 +505,7 @@ class QuivrQARAGLangGraph:
             # Asynchronously invoke the model for each question
             async_jobs.append((model.ainvoke(msg), task_id))
 
-        # Gather all the responses asynchronously
+        # Gather all the responses asynchronously.
         responses = (
             await asyncio.gather(*(jobs[0] for jobs in async_jobs))
             if async_jobs
@@ -598,19 +599,24 @@ class QuivrQARAGLangGraph:
         for task_id in tasks.ids:
             if not tasks(task_id).is_completable() and tasks(task_id).has_tool():
                 tool = tasks(task_id).tool
+                from quivr_core.llm_tools.llm_tools import LLMToolFactory
+
                 tool_wrapper = LLMToolFactory.create_tool(tool, {})
                 formatted_input = tool_wrapper.format_input(tasks(task_id).definition)
-                async_jobs.append((tool_wrapper.tool.ainvoke(formatted_input), task_id))
+                async_jobs.append(
+                    (tool_wrapper.tool.ainvoke(formatted_input), task_id, tool_wrapper)
+                )
 
-        # Gather all the responses asynchronously
+        # Gather all the responses asynchronously.
         responses = (
             await asyncio.gather(*(jobs[0] for jobs in async_jobs))
             if async_jobs
             else []
         )
-        task_ids = [jobs[1] for jobs in async_jobs] if async_jobs else []
 
-        for response, task_id in zip(responses, task_ids, strict=False):
+        for response, (_, task_id, tool_wrapper) in zip(
+            responses, async_jobs, strict=False
+        ):
             _docs = tool_wrapper.format_output(response)
             _docs = self.filter_chunks_by_relevance(_docs)
             tasks.set_docs(task_id, _docs)

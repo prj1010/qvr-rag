@@ -13,7 +13,8 @@ models and provides a modern animated knowledge workspace.
 - Groq LLM support
 - NVIDIA NIM LLM and embedding support
 - PDF, DOCX, CSV, TXT, and Markdown files
-- OCR fallback for scanned PDFs
+- MarkItDown document parsing without a local OCR binary
+- SQLite-backed vector search for lower RAM usage
 - Motion-powered glass, glow, spotlight, and bento-style UI
 - Local Windows CMD setup scripts
 
@@ -28,7 +29,7 @@ FastAPI application API
         +-- Quivr Core document RAG
         +-- MemPalace long-term memory
         +-- Groq or NVIDIA NIM
-        +-- Local OCR for scanned PDFs
+        +-- MarkItDown parsing + optional cloud OCR for scanned PDFs
 ```
 
 ## Requirements
@@ -37,10 +38,8 @@ FastAPI application API
 - Python 3.12
 - Node.js 20 or newer
 - `uv`
-- PyMuPDF4LLM and RapidOCR for PDF extraction, including scanned PDFs
-
-Python 3.13 and newer are not currently supported because the RapidOCR
-dependency used for scanned PDFs declares Python `<3.13`.
+- MarkItDown with only the PDF and DOCX extras used by this app
+- `sqlite-vec` for disk-backed cosine vector search
 
 ## Project structure
 
@@ -118,7 +117,9 @@ NVIDIA_EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
 NVIDIA_EMBEDDING_BATCH_SIZE=50
 QUIVR_CHUNK_SIZE=1200
 QUIVR_CHUNK_OVERLAP=150
-QUIVR_OCR_DPI=150
+MAX_UPLOAD_FILES=10
+MAX_UPLOAD_BYTES=20971520
+MAX_UPLOAD_TOTAL_BYTES=52428800
 ```
 
 Never commit `.env`, API keys, passwords, or PyPI tokens.
@@ -179,12 +180,19 @@ http://127.0.0.1:5173
 5. Use **Recall memory** to inspect MemPalace context.
 6. Review the retrieval trace below the conversation.
 
-## OCR support
+## Document parsing and OCR
 
-PDFs are parsed with PyMuPDF4LLM. Regular PDFs use fast native text/layout
-extraction; pages without selectable text use the bundled RapidOCR ONNX
-backend. A system Tesseract installation is not required. Set
-`QUIVR_PDF_USE_OCR=false` if you only want to accept PDFs with selectable text.
+PDF, DOCX, CSV, TXT, and Markdown uploads are converted to compact Markdown by
+Microsoft MarkItDown. This keeps the service free of Tesseract, RapidOCR, and
+Megaparse/NATS runtime dependencies. Text-based PDFs and PDFs that already have
+an OCR text layer work locally; scanned image-only PDFs are rejected with a
+clear message and should be sent through a managed OCR service such as Azure
+Document Intelligence, or an explicitly configured MarkItDown vision OCR
+plugin.
+
+Uploads are streamed to temporary files and bounded by `MAX_UPLOAD_*` settings;
+parsed text is bounded by `MAX_PARSED_*` settings before chunking and embedding.
+These limits are important on Render Free, where the service has limited RAM.
 
 ## Troubleshooting
 
@@ -196,7 +204,7 @@ Install the bundled local source before installing the requirements:
 uv pip install --python .venv\Scripts\python.exe --no-deps -e src\ragb\core
 ```
 
-### `fasttext-predict` build failure
+### Dependency installation fails
 
 Check the Python version:
 
@@ -232,9 +240,10 @@ run_app.cmd
 ```
 ### Scanned PDF extraction is unavailable
 
-Run `setup.cmd` again so `pymupdf4llm` and `rapidocr-onnxruntime` are installed.
-For faster indexing, use a text-based or already OCR'd PDF. OCR is much slower
-than native PDF text extraction.
+This is expected for image-only PDFs: the lightweight deployment does not ship
+with a local OCR engine. Use a text-based/already OCR'd PDF, or add a managed
+OCR preprocessing step before indexing. This avoids the memory and native-binary
+cost of Tesseract/RapidOCR on small hosts.
 
 ### Check installed dependencies
 
@@ -244,11 +253,12 @@ uv pip check --python .venv\Scripts\python.exe
 
 ## Development notes
 
-The default local implementation keeps the active Quivr Brain in process
-memory. Restarting the application loses the active document index. For a
-production deployment, use persistent vector storage and durable MemPalace
-storage such as Databricks Vector Search, Delta/Unity Catalog storage, or a
-managed database.
+The default local implementation keeps the active Quivr Brain in process state,
+but the document vectors are stored in a temporary SQLite file through
+`sqlite-vec` rather than an in-process FAISS index. Restarting the application
+still loses the active index because Render's filesystem is ephemeral. For a
+production deployment, use persistent `pgvector`, Databricks Vector Search,
+Delta/Unity Catalog storage, or another managed database.
 
 ## Databricks deployment
 
@@ -257,7 +267,7 @@ The FastAPI application is compatible with a Databricks Apps deployment model:
 - Bind the server to `0.0.0.0`.
 - Use the `DATABRICKS_APP_PORT` environment variable.
 - Store provider keys in Databricks secret resources.
-- Replace local FAISS and filesystem persistence with durable storage.
+- Replace temporary SQLite vectors and filesystem persistence with durable storage.
 - Move OCR to a Linux-compatible service or pre-ingestion job.
 
 ## Render deployment

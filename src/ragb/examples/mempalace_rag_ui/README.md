@@ -70,8 +70,8 @@ publish_package.cmd
 
 1. Choose Groq or NVIDIA NIM.
 2. Upload PDF, DOCX, CSV, TXT, or Markdown documents.
-3. Click **Index documents**. Files are parsed locally, so a Megaparse/NATS
-   server is not required.
+3. Click **Index documents**. MarkItDown parses supported files locally, so a
+   Megaparse/NATS server or Tesseract installation is not required.
 4. Click **Recall memories** to test MemPalace alone.
 5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
 
@@ -93,10 +93,13 @@ indexing. Hosted embeddings require
 `NVIDIA_EMBEDDING_BASE_URL`. Set `NVIDIA_EMBEDDING_BATCH_SIZE` to tune request
 batching and `QUIVR_CHUNK_SIZE`/`QUIVR_CHUNK_OVERLAP` to tune chunking.
 
-PDFs use PyMuPDF4LLM for layout-aware extraction. Pages without selectable text
-use the bundled RapidOCR ONNX backend, so a system Tesseract installation is
-not required. Set `QUIVR_PDF_USE_OCR=false` to reject scanned PDFs instead of
-running OCR. OCR can be slower than text extraction; lower `QUIVR_OCR_DPI` for
-faster indexing.
+MarkItDown converts PDF, DOCX, CSV, TXT, and Markdown files to compact Markdown.
+Text-based PDFs and PDFs with an existing OCR text layer work locally. Image-only
+scanned PDFs require a managed OCR preprocessing step (for example, Azure
+Document Intelligence) or an explicitly configured MarkItDown vision OCR
+plugin; this deployment intentionally does not bundle Tesseract or RapidOCR.
+Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
+the extra in-process FAISS index. Use a persistent pgvector or managed vector
+service for production durability.
 Hugging Face support remains available in the standalone integration package
 through its optional `huggingface` extra.

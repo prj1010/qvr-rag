@@ -1,16 +1,10 @@
 import logging
 import os
 import time
-from typing import Union
 from urllib.parse import parse_qs, urlparse
 
 import tiktoken
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
-from langchain_mistralai import ChatMistralAI
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from pydantic import SecretStr
 
 from quivr_core.brain.info import LLMInfo
@@ -214,16 +208,10 @@ class LLMEndpoint:
         if hashed_config in cls._cache:
             return cls._cache[hashed_config]
 
-        _llm: Union[
-            AzureChatOpenAI,
-            ChatOpenAI,
-            ChatAnthropic,
-            ChatMistralAI,
-            ChatGoogleGenerativeAI,
-            ChatGroq,
-        ]
         try:
             if config.supplier == DefaultModelSuppliers.AZURE:
+                from langchain_openai import AzureChatOpenAI
+
                 # Parse the URL
                 parsed_url = urlparse(config.llm_base_url)
                 deployment = parsed_url.path.split("/")[3]  # type: ignore
@@ -240,6 +228,8 @@ class LLMEndpoint:
                     temperature=config.temperature,
                 )
             elif config.supplier == DefaultModelSuppliers.ANTHROPIC:
+                from langchain_anthropic import ChatAnthropic
+
                 assert config.llm_api_key, "Can't load model config"
                 _llm = ChatAnthropic(
                     model_name=config.model,
@@ -251,6 +241,8 @@ class LLMEndpoint:
                     stop=None,
                 )
             elif config.supplier == DefaultModelSuppliers.OPENAI:
+                from langchain_openai import ChatOpenAI
+
                 _llm = ChatOpenAI(
                     model=config.model,
                     api_key=SecretStr(config.llm_api_key)
@@ -263,6 +255,8 @@ class LLMEndpoint:
                     else None,
                 )
             elif config.supplier == DefaultModelSuppliers.MISTRAL:
+                from langchain_mistralai import ChatMistralAI
+
                 _llm = ChatMistralAI(
                     model_name=config.model,
                     api_key=SecretStr(config.llm_api_key)
@@ -272,6 +266,8 @@ class LLMEndpoint:
                     temperature=config.temperature,
                 )
             elif config.supplier == DefaultModelSuppliers.GEMINI:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+
                 _llm = ChatGoogleGenerativeAI(
                     model=config.model,
                     api_key=SecretStr(config.llm_api_key)
@@ -282,6 +278,8 @@ class LLMEndpoint:
                     temperature=config.temperature,
                 )
             elif config.supplier == DefaultModelSuppliers.GROQ:
+                from langchain_groq import ChatGroq
+
                 _llm = ChatGroq(
                     model=config.model,
                     api_key=SecretStr(config.llm_api_key)
@@ -303,6 +301,8 @@ class LLMEndpoint:
                 )
 
             else:
+                from langchain_openai import ChatOpenAI
+
                 _llm = ChatOpenAI(
                     model=config.model,
                     api_key=SecretStr(config.llm_api_key)

@@ -18,7 +18,7 @@ services:
       python -c "from quivr_core import Brain; print('quivr_core import OK')"
       python -c "from agent_rag_governance import RAGGovernor, RAGPolicy; from importlib.metadata import version; print('Agent Governance Toolkit import OK', version('agent-governance-toolkit-core'), version('agent-rag-governance'))"
       python -c "from governance import governance_snapshot; status = governance_snapshot(); assert status['enabled'], status; print('RAG governance runtime OK')"
-      python -c "import pymupdf4llm, rapidocr_onnxruntime; print('PyMuPDF4LLM and RapidOCR import OK')"
+      python -c "import markitdown, sqlite_vec; print('MarkItDown and sqlite-vec import OK')"
       KOKORO_MODELS_DIR=models KOKORO_MODEL_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.int8.onnx KOKORO_MODEL_FILENAME=kokoro-v1.0.int8.onnx KOKORO_VOICES_URL=https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin KOKORO_VOICES_FILENAME=voices-v1.0.bin python -c "from app import _ensure_kokoro_models; _ensure_kokoro_models()"
       cd frontend
       npm ci
@@ -102,6 +102,16 @@ services:
         value: "1200"
       - key: QUIVR_CHUNK_OVERLAP
         value: "150"
+      - key: MAX_UPLOAD_FILES
+        value: "10"
+      - key: MAX_UPLOAD_BYTES
+        value: "20971520"
+      - key: MAX_UPLOAD_TOTAL_BYTES
+        value: "52428800"
+      - key: MAX_PARSED_DOCUMENT_CHARS
+        value: "5000000"
+      - key: MAX_PARSED_TOTAL_CHARS
+        value: "10000000"
       - key: MEMPALACE_PALACE_PATH
         value: /tmp/.mempalace/palace
       # Use the smaller model and cache it in the deploy artifact during build.
