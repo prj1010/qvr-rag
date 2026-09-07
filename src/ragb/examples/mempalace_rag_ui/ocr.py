@@ -33,7 +33,11 @@ def _docling_converter():
 
     try:
         from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.object_detection_engine_options import (
+            OnnxRuntimeObjectDetectionEngineOptions,
+        )
         from docling.datamodel.pipeline_options import (
+            LayoutObjectDetectionOptions,
             OcrMode,
             PdfPipelineOptions,
             RapidOcrOptions,
@@ -41,13 +45,18 @@ def _docling_converter():
         from docling.document_converter import DocumentConverter, PdfFormatOption
     except ImportError as exc:
         raise RuntimeError(
-            "Docling OCR is not installed. Install "
-            "docling-slim[format-pdf,feat-ocr-rapidocr-onnx] and restart."
+            "Docling OCR dependencies are unavailable. Install "
+            "docling-slim[format-pdf,feat-ocr-rapidocr-onnx] and restart. "
+            f"Import error: {exc}"
         ) from exc
 
     pipeline_options = PdfPipelineOptions(
         do_ocr=True,
         do_table_structure=False,
+        layout_options=LayoutObjectDetectionOptions.from_preset(
+            "layout_heron_default",
+            engine_options=OnnxRuntimeObjectDetectionEngineOptions(),
+        ),
         ocr_options=RapidOcrOptions(
             lang=[os.getenv("DOCLING_OCR_LANG", "en").strip() or "en"],
             mode=OcrMode.FULL_PAGE,

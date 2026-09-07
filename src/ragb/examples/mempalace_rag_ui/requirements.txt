@@ -45,6 +45,12 @@ markitdown[pdf,docx]>=0.1,<1
 # Docling is loaded lazily and used for scanned PDFs. RapidOCR avoids a
 # Tesseract system dependency; the upper bound protects the current API.
 docling-slim[format-pdf,feat-ocr-rapidocr-onnx]>=2.121,<3
+scipy>=1.6,<2
+rtree>=1.3,<2
+# Docling's current PDF pipeline imports these for CPU device detection and
+# image preprocessing even when layout/OCR inference uses ONNX Runtime.
+torch>=2.2,<3
+torchvision>=0.17,<1
 
 # --- Low-memory vector storage ---
 # SQLite-backed vectors replace Quivr's in-process FAISS default.

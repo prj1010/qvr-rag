@@ -98,9 +98,12 @@ Text-based PDFs and PDFs with an existing OCR text layer work locally. When
 MarkItDown returns no text, scanned PDFs use local Docling OCR with the
 lightweight `docling-slim[format-pdf,feat-ocr-rapidocr-onnx]` package. RapidOCR
 uses ONNX Runtime and does not require Tesseract. Docling is loaded lazily and
-conversions are serialized to keep memory use bounded on Render. The optional
-DocStrange cloud route is disabled by default; enable it explicitly with
-`DOCSTRANGE_FALLBACK_ENABLED=true` if a provider fallback is needed.
+conversions are serialized to keep memory use bounded on Render. The current
+Docling PDF pipeline also needs CPU-only PyTorch and Torchvision for device
+detection and image preprocessing; the Render build explicitly uses CPU wheels
+and does not install CUDA. The optional DocStrange cloud route is disabled by
+default; enable it explicitly with `DOCSTRANGE_FALLBACK_ENABLED=true` if a
+provider fallback is needed.
 Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
 the extra in-process FAISS index. Use a persistent pgvector or managed vector
 service for production durability.
