@@ -46,9 +46,15 @@ class LLMTokenizer:
                     from transformers import AutoTokenizer
 
                     self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_hub)
-            except OSError:  # if we don't manage to connect to huggingface and/or no cached models are present
+            except (ImportError, OSError):
+                # ``transformers`` is an optional dependency.  Keep tokenizer
+                # loading lightweight for deployments that use hosted models
+                # and do not install the Hugging Face stack locally.
                 logger.warning(
-                    f"Cannot acces the configured tokenizer from {self.tokenizer_hub}, using the default tokenizer {self.fallback_tokenizer}"
+                    "Cannot load the configured tokenizer from %s; using the "
+                    "fallback tokenizer %s",
+                    self.tokenizer_hub,
+                    self.fallback_tokenizer,
                 )
                 self.tokenizer = tiktoken.get_encoding(self.fallback_tokenizer)
         else:

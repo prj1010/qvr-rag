@@ -1,10 +1,12 @@
 import os
+import sys
 
 import pytest
 from langchain_core.language_models import FakeListChatModel
 from pydantic import ValidationError
 from quivr_core.rag.entities.config import LLMEndpointConfig
 from quivr_core.llm import LLMEndpoint
+from quivr_core.llm.llm_endpoint import LLMTokenizer
 
 
 @pytest.mark.base
@@ -46,3 +48,11 @@ def test_llm_endpoint_constructor():
     )
 
     assert not llm_endpoint.supports_func_calling()
+
+
+def test_llm_tokenizer_falls_back_without_transformers(monkeypatch):
+    monkeypatch.setitem(sys.modules, "transformers", None)
+
+    tokenizer = LLMTokenizer("missing-transformers-model", "cl100k_base")
+
+    assert tokenizer.tokenizer.encode("fallback works")
