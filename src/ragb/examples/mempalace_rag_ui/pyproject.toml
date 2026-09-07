@@ -21,6 +21,7 @@ dependencies = [
     "langchain-text-splitters>=0.3,<0.4",
     "langchain-groq>=0.3.5,<1",
     "langchain-nvidia-ai-endpoints>=0.3.19,<1",
+    "langchain-openai>=0.3,<0.4",
     "langfuse>=2.57,<3",
     "httpx>=0.27,<1",
     "numpy>=1.26,<3",
@@ -47,7 +48,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "admin_auth", "observability", "governance", "ocr"]
+py-modules = [
+    "app",
+    "admin_auth",
+    "model_catalog",
+    "observability",
+    "governance",
+    "ocr",
+    "prompts",
+    "sqlite_vector_store",
+]
 include-package-data = true
 
 [tool.setuptools.packages.find]

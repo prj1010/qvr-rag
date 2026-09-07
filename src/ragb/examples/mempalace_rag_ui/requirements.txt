@@ -20,6 +20,7 @@ langchain-core>=0.3,<0.4
 langchain-text-splitters>=0.3,<0.4
 langchain-groq>=0.3.5,<1
 langchain-nvidia-ai-endpoints>=0.3.19,<1
+langchain-openai>=0.3,<0.4
 
 # --- Quivr RAG core ---
 quivr-core>=0.0.33,<0.1

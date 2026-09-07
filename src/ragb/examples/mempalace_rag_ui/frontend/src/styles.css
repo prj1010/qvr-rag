@@ -104,3 +104,5 @@ h1 span { color: #a897ff; background: linear-gradient(105deg, #c4b7ff 5%, #8069f
 @media (max-width: 980px) { .admin-grid { grid-template-columns: 1fr; } }
 @media (max-width: 980px) { .governance-lower-grid { grid-template-columns: 1fr; } }
 @media (max-width: 650px) { .admin-nav-button { padding: 0 8px; font-size: 10px; }.admin-nav-button svg { display: none; }.admin-identity { display: none; }.admin-grid { gap: 12px; }.trace-panel, .detail-panel, .operations-panel, .governance-panel { padding: 16px; }.governance-summary { grid-template-columns: 1fr 1fr; } }
+.field-hint { margin-top: 6px; color: #7883a8; font-size: 10px; line-height: 1.45; }
+.custom-model-input { margin-top: 8px; }

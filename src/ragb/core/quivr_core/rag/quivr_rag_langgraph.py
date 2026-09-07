@@ -57,6 +57,30 @@ langfuse_service = LangfuseService()
 langfuse_handler = langfuse_service.get_handler()
 
 
+def _latest_user_message(messages: Sequence[BaseMessage]) -> str:
+    """Return the latest human message even when a system prompt is present."""
+
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return str(message.content)
+    return ""
+
+
+def _application_instructions(
+    messages: Sequence[BaseMessage], configured_prompt: str | None
+) -> str:
+    """Combine application instructions without confusing them with the user task."""
+
+    system_instructions = "\n\n".join(
+        str(message.content)
+        for message in messages
+        if isinstance(message, SystemMessage) and message.content
+    )
+    return "\n\n".join(
+        part for part in (system_instructions, configured_prompt or "") if part
+    )
+
+
 class SplittedInput(BaseModel):
     instructions_reasoning: Optional[str] = Field(
         default=None,
@@ -326,7 +350,7 @@ class QuivrQARAGLangGraph:
         """
 
         msg = custom_prompts[TemplatePromptName.SPLIT_PROMPT].format(
-            user_input=state["messages"][0].content,
+            user_input=_latest_user_message(state["messages"]),
         )
 
         response: SplittedInput
@@ -371,7 +395,7 @@ class QuivrQARAGLangGraph:
         response: SplittedInput = self.invoke_structured_output(
             custom_prompts[TemplatePromptName.SPLIT_PROMPT].format(
                 chat_history=state["chat_history"].to_list(),
-                user_input=state["messages"][0].content,
+                user_input=_latest_user_message(state["messages"]),
             ),
             SplittedInput,
         )
@@ -491,7 +515,7 @@ class QuivrQARAGLangGraph:
         if "tasks" in state and state["tasks"]:
             tasks = state["tasks"]
         else:
-            tasks = UserTasks([state["messages"][0].content])
+            tasks = UserTasks([_latest_user_message(state["messages"])])
 
         # Prepare the async tasks for all user tsks
         async_jobs = []
@@ -636,7 +660,7 @@ class QuivrQARAGLangGraph:
         if "tasks" in state:
             tasks = state["tasks"]
         else:
-            tasks = UserTasks([state["messages"][0].content])
+            tasks = UserTasks([_latest_user_message(state["messages"])])
 
         if not tasks.has_tasks():
             return {**state}
@@ -697,7 +721,7 @@ class QuivrQARAGLangGraph:
         if "tasks" in state:
             tasks = state["tasks"]
         else:
-            tasks = UserTasks([state["messages"][0].content])
+            tasks = UserTasks([_latest_user_message(state["messages"])])
 
         if not tasks or not tasks.has_tasks():
             return {**state}
@@ -777,7 +801,7 @@ class QuivrQARAGLangGraph:
         if "tasks" in state:
             tasks = state["tasks"]
         else:
-            tasks = UserTasks([state["messages"][0].content])
+            tasks = UserTasks([_latest_user_message(state["messages"])])
 
         if not tasks.has_tasks():
             return {**state}
@@ -930,7 +954,7 @@ class QuivrQARAGLangGraph:
         tasks = state["tasks"]
         docs: List[Document] = tasks.docs if tasks else []
         messages = state["messages"]
-        user_task = messages[0].content
+        user_task = _latest_user_message(messages)
         prompt_template: BasePromptTemplate = custom_prompts[
             TemplatePromptName.ZENDESK_TEMPLATE_PROMPT
         ]
@@ -994,7 +1018,7 @@ class QuivrQARAGLangGraph:
                 user_message = str(msg.content)
 
         user_task = (
-            user_message if user_message else (messages[0].content if messages else "")
+            user_message if user_message else _latest_user_message(messages)
         )
 
         # Prompt
@@ -1215,16 +1239,18 @@ class QuivrQARAGLangGraph:
             Dictionary containing all inputs needed for RAG_ANSWER_PROMPT
         """
         messages = state["messages"]
-        user_task = messages[0].content
+        user_task = _latest_user_message(messages)
         files = state["files"]
-        prompt = self.retrieval_config.prompt
+        application_instructions = _application_instructions(
+            messages, self.retrieval_config.prompt
+        )
         # available_tools, _ = collect_tools(self.retrieval_config.workflow_config)
 
         return {
             "context": combine_documents(docs) if docs else "None",
             "task": user_task,
             "rephrased_task": state["tasks"].definitions if state["tasks"] else "None",
-            "custom_instructions": prompt if prompt else "None",
+            "custom_instructions": application_instructions or "None",
             "files": files if files else "None",
             "chat_history": state["chat_history"].to_list(),
             # "reasoning": state["reasoning"] if "reasoning" in state else "None",

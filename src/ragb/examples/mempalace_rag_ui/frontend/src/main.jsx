@@ -37,11 +37,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const MODELS = {
-  Groq: "llama-3.3-70b-versatile",
-  "NVIDIA NIM": "nvidia/nemotron-3-super-120b-a12b",
-};
-
+const CUSTOM_MODEL = "__custom__";
 const ACCEPTED_FILES = ".pdf,.docx,.xlsx,.html,.htm,.csv,.txt,.md,.markdown,.mdx";
 
 async function apiRequest(url, options = {}) {
@@ -59,8 +55,10 @@ function App() {
       ? "observability"
       : "workspace";
   });
-  const [provider, setProvider] = useState("Groq");
-  const [model, setModel] = useState(MODELS.Groq);
+  const [modelCatalog, setModelCatalog] = useState({});
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
+  const [customModel, setCustomModel] = useState("");
   const [brainName, setBrainName] = useState("mempalace-quivr");
   const [wing, setWing] = useState("quivr-demo");
   const [palacePath, setPalacePath] = useState("~/.mempalace/palace");
@@ -87,8 +85,37 @@ function App() {
   }
 
   useEffect(() => {
-    setModel(MODELS[provider]);
-  }, [provider]);
+    let active = true;
+    apiRequest("/api/models")
+      .then((payload) => {
+        if (active) setModelCatalog(payload.providers || {});
+      })
+      .catch(() => {
+        if (active) {
+          setStatus({ tone: "error", text: "Model catalog is unavailable." });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const providers = Object.keys(modelCatalog);
+    if (!providers.length) return;
+    setProvider((current) => (providers.includes(current) ? current : providers[0]));
+  }, [modelCatalog]);
+
+  useEffect(() => {
+    if (!provider || model === CUSTOM_MODEL) return;
+    const firstModel = modelCatalog[provider]?.models?.[0]?.id;
+    if (!firstModel) return;
+    const isKnownModel = modelCatalog[provider].models.some(({ id }) => id === model);
+    if (!isKnownModel) setModel(firstModel);
+  }, [modelCatalog, provider, model]);
+
+  const providerConfig = modelCatalog[provider] || { description: "", models: [] };
+  const selectedModel = model === CUSTOM_MODEL ? customModel.trim() : model;
 
   function addFiles(incoming) {
     const next = Array.from(incoming || []).filter((file) => {
@@ -110,12 +137,16 @@ function App() {
       setIndexStatus("Choose at least one document first.");
       return;
     }
+    if (!provider || !selectedModel) {
+      setIndexStatus("Choose a provider and model first.");
+      return;
+    }
     setIsIndexing(true);
     setStatus({ tone: "working", text: "Reading documents and building embeddings…" });
     const body = new FormData();
     files.forEach((file) => body.append("files", file));
     body.append("provider", provider);
-    body.append("model_name", model);
+    body.append("model_name", selectedModel);
     body.append("brain_name", brainName);
     try {
       const payload = await apiRequest("/api/index", { method: "POST", body });
@@ -242,7 +273,7 @@ function App() {
         <section className="stats-grid" aria-label="Workspace overview">
           <StatCard icon={<LibraryBig size={18} />} label="Memory layer" value="MemPalace" detail="Persistent recall" accent="violet" />
           <StatCard icon={<Network size={18} />} label="Retrieval layer" value="Quivr RAG" detail="Semantic search" accent="cyan" />
-          <StatCard icon={<Zap size={18} />} label="Active model" value={provider} detail={model} accent="amber" />
+          <StatCard icon={<Zap size={18} />} label="Active model" value={provider || "Loading"} detail={selectedModel || "Fetching model catalog…"} accent="amber" />
           <StatCard icon={<Gauge size={18} />} label="Workspace state" value={files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "Empty"} detail={indexStatus} accent="green" />
         </section>
 
@@ -259,16 +290,25 @@ function App() {
             <div className="form-section">
               <label htmlFor="provider">LLM provider</label>
               <div className="select-wrap">
-                <select id="provider" value={provider} onChange={(event) => setProvider(event.target.value)}>
-                  <option>Groq</option>
-                  <option>NVIDIA NIM</option>
+                <select id="provider" value={provider} onChange={(event) => setProvider(event.target.value)} disabled={!Object.keys(modelCatalog).length}>
+                  {!Object.keys(modelCatalog).length && <option value="">Loading providers…</option>}
+                  {Object.entries(modelCatalog).map(([name]) => <option key={name} value={name}>{name}</option>)}
                 </select>
                 <ChevronDown size={15} />
               </div>
+              {providerConfig.description && <div className="field-hint">{providerConfig.description}</div>}
             </div>
             <div className="form-section">
               <label htmlFor="model">Model</label>
-              <input id="model" value={model} onChange={(event) => setModel(event.target.value)} />
+              <div className="select-wrap">
+                <select id="model" value={model} onChange={(event) => setModel(event.target.value)} disabled={!providerConfig.models.length}>
+                  {providerConfig.models.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.details}</option>)}
+                  <option value={CUSTOM_MODEL}>Custom deployment/model ID…</option>
+                </select>
+                <ChevronDown size={15} />
+              </div>
+              {model === CUSTOM_MODEL && <input id="custom-model" className="custom-model-input" placeholder="Enter your deployment/model ID" value={customModel} onChange={(event) => setCustomModel(event.target.value)} />}
+              {provider === "Microsoft Foundry" && <div className="field-hint">Use the deployment name configured in Microsoft Foundry.</div>}
             </div>
             <div className="form-section">
               <label htmlFor="brain-name">Brain name</label>

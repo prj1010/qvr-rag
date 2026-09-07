@@ -29,6 +29,7 @@ import uvicorn
 from admin_auth import ADMIN_AUTH
 from governance import apply_governance, evaluate_governance, governance_snapshot
 from observability import OBSERVABILITY, content_metadata
+from model_catalog import MODEL_CATALOG, model_catalog_response
 from ocr import (
     OlgaRequiresOcrError,
     docstrange_configured,
@@ -37,6 +38,7 @@ from ocr import (
     extract_docstrange_text,
     extract_olga_text,
 )
+from prompts import build_rag_system_prompt
 from quivr_core import Brain
 from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
@@ -343,7 +345,9 @@ def _load_app_environment() -> None:
 def _default_model(provider: str) -> str:
     if provider == "NVIDIA NIM":
         return os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
-    return os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    if provider == "Microsoft Foundry":
+        return os.getenv("MICROSOFT_FOUNDRY_MODEL", "Phi-4-mini-instruct")
+    return os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 
 def _required(name: str) -> str:
@@ -395,7 +399,44 @@ def _build_llm(provider: str, model_name: str) -> LLMEndpoint:
         )
         config_key = api_key
         config_url = base_url
-    else:
+    elif provider == "Microsoft Foundry":
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "Microsoft Foundry requires langchain-openai. Run setup.cmd again."
+            ) from exc
+
+        api_key = (
+            os.getenv("MICROSOFT_FOUNDRY_API_KEY", "").strip()
+            or os.getenv("OPENAI_API_KEY", "").strip()
+        )
+        base_url = (
+            os.getenv("MICROSOFT_FOUNDRY_BASE_URL", "").strip()
+            or os.getenv("OPENAI_BASE_URL", "").strip()
+        )
+        if not api_key:
+            raise RuntimeError(
+                "Set MICROSOFT_FOUNDRY_API_KEY for Microsoft Foundry inference."
+            )
+        if not base_url:
+            raise RuntimeError(
+                "Set MICROSOFT_FOUNDRY_BASE_URL to the Foundry OpenAI v1 endpoint."
+            )
+        chat_model = ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url.rstrip("/"),
+            temperature=0.2,
+        )
+        supplier = getattr(
+            DefaultModelSuppliers,
+            "OPENAI",
+            DefaultModelSuppliers.GROQ,
+        )
+        config_key = api_key
+        config_url = base_url
+    elif provider == "Groq":
         from langchain_groq import ChatGroq
 
         config_key = _required("GROQ_API_KEY")
@@ -406,6 +447,11 @@ def _build_llm(provider: str, model_name: str) -> LLMEndpoint:
         )
         supplier = DefaultModelSuppliers.GROQ
         config_url = None
+    else:
+        supported = ", ".join(MODEL_CATALOG)
+        raise RuntimeError(
+            f"Unsupported model provider '{provider}'. Choose one of: {supported}."
+        )
 
     config = LLMEndpointConfig(
         supplier=supplier,
@@ -522,11 +568,7 @@ class AsyncQuivrResponder:
         self.brain = brain
 
     def __call__(self, question: str, memory_context: str) -> str:
-        system_prompt = (
-            "Answer the question using the uploaded documents. Prior MemPalace "
-            "memories are context only; ignore them if they are irrelevant.\n\n"
-            f"{memory_context}"
-        )
+        system_prompt = build_rag_system_prompt(memory_context)
         response = asyncio.run(
             self.brain.aask(
                 run_id=uuid4(),
@@ -778,6 +820,13 @@ def health() -> dict[str, Any]:
         "indexed_files": len(STATE.indexed_files),
         "indexed_chunks": STATE.indexed_chunks,
     }
+
+
+@app.get("/api/models")
+def models() -> dict[str, Any]:
+    """Return the curated provider/model catalog used by the workspace UI."""
+
+    return model_catalog_response()
 
 
 @app.post("/api/index")

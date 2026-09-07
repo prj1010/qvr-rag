@@ -68,13 +68,22 @@ set "UV_PUBLISH_TOKEN=pypi-your-new-token"
 publish_package.cmd
 ```
 
-1. Choose Groq or NVIDIA NIM.
+1. Choose a provider and model from the catalog. Available providers include
+   Groq, NVIDIA NIM, and Microsoft Foundry; Phi SLMs are available through the
+   latter two when their credentials/endpoints are configured.
 2. Upload PDF, DOCX, XLSX, HTML, CSV, TXT, or Markdown documents.
 3. Click **Index documents**. Olga parses native-text PDF, DOCX, XLSX, and HTML
    files locally; MarkItDown covers CSV, text, Markdown, and parser fallback
    cases. A Megaparse/NATS server or Tesseract installation is not required.
 4. Click **Recall memories** to test MemPalace alone.
 5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
+
+The response prompt is application-owned and keeps the model grounded in the
+indexed documents. Retrieved memories and document text are explicitly marked
+as untrusted evidence, so instructions embedded inside a document cannot
+override the user request or the application rules. The prompt also requires
+uncertainty disclosure, conflict handling, source-aware citations, privacy
+protection, and concise answers.
 
 The Microsoft Agent Governance Toolkit fork is installed by the app
 `requirements.txt` at a pinned commit. The admin-only **Agent governance**

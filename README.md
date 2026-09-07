@@ -1,8 +1,8 @@
 # Quivr × MemPalace RAG UI
 
 A React and FastAPI application that combines Quivr document retrieval with
-MemPalace long-term memory. The application supports Groq and NVIDIA NIM
-models and provides a modern animated knowledge workspace.
+MemPalace long-term memory. The application supports Groq, NVIDIA NIM, and
+Microsoft Foundry models and provides a modern animated knowledge workspace.
 
 ## Features
 
@@ -12,6 +12,8 @@ models and provides a modern animated knowledge workspace.
 - MemPalace memory recall and persistence
 - Groq LLM support
 - NVIDIA NIM LLM and embedding support
+- Microsoft Foundry OpenAI v1-compatible Phi/SLM support
+- Grounded, injection-resistant RAG system prompt with bounded memory context
 - PDF, DOCX, XLSX, HTML, CSV, TXT, and Markdown files
 - Olga native document parsing with Docling/RapidOCR fallback for scanned PDFs
 - SQLite-backed vector search for lower RAM usage
@@ -28,7 +30,7 @@ FastAPI application API
         |
         +-- Quivr Core document RAG
         +-- MemPalace long-term memory
-        +-- Groq or NVIDIA NIM
+        +-- Groq, NVIDIA NIM, or Microsoft Foundry
         +-- Olga native parsing + MarkItDown compatibility parsing
         +-- Docling/RapidOCR or optional cloud OCR for scanned PDFs
 ```
@@ -107,13 +109,17 @@ Configure at least one LLM provider:
 ```text
 GROQ_API_KEY=your-groq-key
 NVIDIA_API_KEY=your-nvidia-key
+# For Phi through Microsoft Foundry:
+MICROSOFT_FOUNDRY_API_KEY=your-foundry-key
+MICROSOFT_FOUNDRY_BASE_URL=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1
 ```
 
 Useful model settings include:
 
 ```text
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-20b
 NVIDIA_MODEL=nvidia/nemotron-3-super-120b-a12b
+MICROSOFT_FOUNDRY_MODEL=Phi-4-mini-instruct
 NVIDIA_EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
 NVIDIA_EMBEDDING_BATCH_SIZE=50
 QUIVR_CHUNK_SIZE=1200
@@ -174,7 +180,10 @@ http://127.0.0.1:5173
 
 ## Using the application
 
-1. Select Groq or NVIDIA NIM.
+1. Select a provider and model from the catalog. The workspace includes
+   current Groq, NVIDIA NIM, and Microsoft Phi/Foundry SLM choices. The Phi
+   recipes and deployment examples are maintained in Microsoft's
+   [PhiCookBook](https://github.com/microsoft/PhiCookBook).
 2. Upload PDF, DOCX, XLSX, HTML, CSV, TXT, or Markdown files.
 3. Click **Index documents**.
 4. Ask questions about the uploaded sources.

@@ -37,8 +37,8 @@ if exist "%LOCAL_BASE%\pyproject.toml" (
     if errorlevel 1 exit /b 1
 )
 
-echo Installing the lightweight Groq and NVIDIA provider dependencies...
-uv pip install --python "%PY%" --upgrade "langchain-groq>=0.3.5,<1" "langchain-nvidia-ai-endpoints>=0.3.19,<1" "python-dotenv>=1.0"
+echo Installing the lightweight Groq, NVIDIA, and Microsoft provider dependencies...
+uv pip install --python "%PY%" --upgrade "langchain-groq>=0.3.5,<1" "langchain-nvidia-ai-endpoints>=0.3.19,<1" "langchain-openai>=0.3,<0.4" "python-dotenv>=1.0"
 if errorlevel 1 exit /b 1
 
 echo Installing the local Quivr Core fork...
