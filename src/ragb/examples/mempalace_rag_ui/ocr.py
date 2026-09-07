@@ -46,7 +46,7 @@ def extract_docstrange_text(path: Path) -> str:
 
     api_url = os.getenv(
         "DOCSTRANGE_API_URL",
-        "https://extraction-api.nanonets.com/extract",
+        "https://extraction-api.nanonets.com/api/v1/extract",
     ).strip()
     try:
         response = None

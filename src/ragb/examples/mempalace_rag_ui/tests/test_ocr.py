@@ -26,7 +26,7 @@ class _FakeHttpx:
 
     @staticmethod
     def post(url, headers, files, data, timeout):
-        assert url == "https://extraction-api.nanonets.com/extract"
+        assert url == "https://extraction-api.nanonets.com/api/v1/extract"
         assert headers == {"Authorization": "Bearer test-key"}
         assert data == {"output_type": "markdown"}
         assert files["file"][0] == "test-ocr-scan.pdf"
