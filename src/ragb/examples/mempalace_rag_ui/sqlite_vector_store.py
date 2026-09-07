@@ -14,9 +14,12 @@ filesystem.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
+import struct
 import tempfile
+import warnings
 from pathlib import Path
 from threading import RLock
 from typing import Any, Iterable
@@ -27,8 +30,41 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
 
+def _try_load_sqlite_vec_extension(
+    connection: sqlite3.Connection,
+    sqlite_vec: Any,
+) -> tuple[bool, str | None]:
+    """Load sqlite-vec when the host SQLite build supports extensions."""
+
+    load_extension = getattr(connection, "load_extension", None)
+    if not callable(load_extension):
+        return False, "sqlite3.Connection.load_extension is unavailable"
+
+    enable_load_extension = getattr(connection, "enable_load_extension", None)
+    try:
+        if callable(enable_load_extension):
+            enable_load_extension(True)
+        sqlite_vec.load(connection)
+        return True, None
+    except Exception as exc:  # pragma: no cover - depends on host SQLite build
+        return False, f"{type(exc).__name__}: {exc}"
+    finally:
+        if callable(enable_load_extension):
+            try:
+                enable_load_extension(False)
+            except Exception:
+                # The connection may already be unusable after a failed load.
+                pass
+
+
 class SQLiteVecStore(VectorStore):
-    """A compact disk-backed cosine vector store implemented with sqlite-vec."""
+    """A compact disk-backed cosine vector store.
+
+    sqlite-vec is used when the host SQLite build can load extensions. If it
+    cannot, vectors are stored as float32 BLOBs in ordinary SQLite and cosine
+    scoring is performed for the result set in Python. The fallback is slower
+    for large indexes, but keeps indexing functional on restricted runtimes.
+    """
 
     def __init__(
         self,
@@ -54,9 +90,17 @@ class SQLiteVecStore(VectorStore):
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.execute("PRAGMA temp_store=FILE")
-        self._db.enable_load_extension(True)
-        sqlite_vec.load(self._db)
-        self._db.enable_load_extension(False)
+        self._use_sqlite_vec, extension_error = _try_load_sqlite_vec_extension(
+            self._db, sqlite_vec
+        )
+        self._vector_table = "vectors" if self._use_sqlite_vec else "vectors_fallback"
+        if not self._use_sqlite_vec:
+            warnings.warn(
+                "sqlite-vec could not be loaded; using the disk-backed SQLite "
+                f"cosine-search fallback ({extension_error}).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._dimension: int | None = None
         self._closed = False
 
@@ -101,19 +145,61 @@ class SQLiteVecStore(VectorStore):
             )
             """
         )
-        self._db.execute(
-            f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
-                document_id INTEGER PRIMARY KEY,
-                embedding float[{int(dimension)}] distance_metric=cosine
+        if self._use_sqlite_vec:
+            self._db.execute(
+                f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
+                    document_id INTEGER PRIMARY KEY,
+                    embedding float[{int(dimension)}] distance_metric=cosine
+                )
+                """
             )
-            """
-        )
+        else:
+            self._db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vectors_fallback(
+                    document_id INTEGER PRIMARY KEY,
+                    embedding BLOB NOT NULL
+                )
+                """
+            )
         self._dimension = dimension
 
     @staticmethod
     def _metadata_json(metadata: dict[str, Any]) -> str:
         return json.dumps(metadata, ensure_ascii=False, default=str)
+
+    @staticmethod
+    def _serialize_fallback_vector(vector: Iterable[float]) -> bytes:
+        values = tuple(float(value) for value in vector)
+        if not values:
+            raise ValueError("The embedding provider returned an empty vector.")
+        return struct.pack(f"<{len(values)}f", *values)
+
+    @staticmethod
+    def _deserialize_fallback_vector(blob: bytes, dimension: int) -> tuple[float, ...]:
+        expected_size = dimension * struct.calcsize("f")
+        if len(blob) != expected_size:
+            raise ValueError(
+                f"Stored vector has {len(blob)} bytes; expected {expected_size}."
+            )
+        return struct.unpack(f"<{dimension}f", blob)
+
+    @staticmethod
+    def _cosine_distance(left: Iterable[float], right: Iterable[float]) -> float:
+        left_values = tuple(float(value) for value in left)
+        right_values = tuple(float(value) for value in right)
+        if len(left_values) != len(right_values):
+            raise ValueError("Embedding dimensions do not match.")
+        left_norm = math.sqrt(math.fsum(value * value for value in left_values))
+        right_norm = math.sqrt(math.fsum(value * value for value in right_values))
+        if left_norm == 0.0 or right_norm == 0.0:
+            return 0.0 if left_norm == right_norm else 1.0
+        similarity = math.fsum(
+            left_value * right_value
+            for left_value, right_value in zip(left_values, right_values, strict=True)
+        ) / (left_norm * right_norm)
+        return 1.0 - similarity
 
     def add_texts(
         self,
@@ -182,7 +268,7 @@ class SQLiteVecStore(VectorStore):
                         else:
                             document_id = int(existing[0])
                             self._db.execute(
-                                "DELETE FROM vectors WHERE document_id = ?",
+                                f"DELETE FROM {self._vector_table} WHERE document_id = ?",
                                 (document_id,),
                             )
 
@@ -203,9 +289,15 @@ class SQLiteVecStore(VectorStore):
                                 self._metadata_json(metadata),
                             ),
                         )
+                        serialized_vector = (
+                            serialize_float32(vector)
+                            if self._use_sqlite_vec
+                            else self._serialize_fallback_vector(vector)
+                        )
                         self._db.execute(
-                            "INSERT INTO vectors(document_id, embedding) VALUES (?, ?)",
-                            (document_id, serialize_float32(vector)),
+                            f"INSERT INTO {self._vector_table}(document_id, embedding) "
+                            "VALUES (?, ?)",
+                            (document_id, serialized_vector),
                         )
                         result_ids.append(external_id)
                 self._db.execute("COMMIT")
@@ -233,15 +325,30 @@ class SQLiteVecStore(VectorStore):
             if self._dimension is None:
                 return []
             limit = max(k, int(fetch_k or k))
-            matches = self._db.execute(
-                """
-                SELECT document_id, distance
-                FROM vectors
-                WHERE embedding MATCH ? AND k = ?
-                ORDER BY distance
-                """,
-                (serialize_float32(query_vector), limit),
-            ).fetchall()
+            if self._use_sqlite_vec:
+                matches = self._db.execute(
+                    """
+                    SELECT document_id, distance
+                    FROM vectors
+                    WHERE embedding MATCH ? AND k = ?
+                    ORDER BY distance
+                    """,
+                    (serialize_float32(query_vector), limit),
+                ).fetchall()
+            else:
+                fallback_matches: list[tuple[int, float]] = []
+                for document_id, blob in self._db.execute(
+                    "SELECT document_id, embedding FROM vectors_fallback"
+                ):
+                    try:
+                        candidate = self._deserialize_fallback_vector(
+                            blob, self._dimension
+                        )
+                        distance = self._cosine_distance(query_vector, candidate)
+                    except (TypeError, ValueError, struct.error):
+                        continue
+                    fallback_matches.append((int(document_id), distance))
+                matches = sorted(fallback_matches, key=lambda item: item[1])[:limit]
             results: list[tuple[Document, float]] = []
             for document_id, distance in matches[:k]:
                 row = self._db.execute(
@@ -281,7 +388,7 @@ class SQLiteVecStore(VectorStore):
         del kwargs
         with self._lock:
             if ids is None:
-                self._db.execute("DELETE FROM vectors")
+                self._db.execute(f"DELETE FROM {self._vector_table}")
                 self._db.execute("DELETE FROM documents")
                 return True
             for external_id in ids:
@@ -290,7 +397,10 @@ class SQLiteVecStore(VectorStore):
                     (external_id,),
                 ).fetchone()
                 if row is not None:
-                    self._db.execute("DELETE FROM vectors WHERE document_id = ?", (row[0],))
+                    self._db.execute(
+                        f"DELETE FROM {self._vector_table} WHERE document_id = ?",
+                        (row[0],),
+                    )
                     self._db.execute("DELETE FROM documents WHERE document_id = ?", (row[0],))
             return True
 

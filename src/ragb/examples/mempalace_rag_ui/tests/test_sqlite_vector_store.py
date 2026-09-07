@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -54,6 +55,32 @@ class SQLiteVecStoreTests(unittest.TestCase):
         self.assertTrue(store.delete(["sqlite-doc"]))
         self.assertEqual(store.similarity_search("SQLite", k=2)[0].id, "python-doc")
         store.cleanup()
+        self.assertFalse(path.exists())
+
+    def test_falls_back_when_sqlite_extension_api_is_unavailable(self) -> None:
+        path = Path.cwd() / "test-vectors-fallback.sqlite3"
+        for suffix in ("", "-wal", "-shm"):
+            path.with_name(path.name + suffix).unlink(missing_ok=True)
+        self.addCleanup(
+            lambda: [
+                path.with_name(path.name + suffix).unlink(missing_ok=True)
+                for suffix in ("", "-wal", "-shm")
+            ]
+        )
+
+        with patch(
+            "sqlite_vector_store._try_load_sqlite_vec_extension",
+            return_value=(False, "sqlite3.Connection.enable_load_extension is unavailable"),
+        ):
+            store = SQLiteVecStore(path, DeterministicEmbeddings())
+            store.add_texts(
+                ["Python deployment", "SQLite vector storage"],
+                [{"source": "python"}, {"source": "sqlite"}],
+                ids=["python-doc", "sqlite-doc"],
+            )
+            results = store.similarity_search_with_score("SQLite", k=1)
+            self.assertEqual(results[0][0].id, "sqlite-doc")
+            store.cleanup()
         self.assertFalse(path.exists())
 
 
