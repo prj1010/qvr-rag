@@ -635,12 +635,14 @@ function Message({ prompt, answer }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [audioError, setAudioError] = useState("");
+  const [audioReady, setAudioReady] = useState(false);
   const audioRef = useRef(null);
   const audioUrlRef = useRef("");
 
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
+      window.speechSynthesis?.cancel();
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
       }
@@ -658,6 +660,7 @@ function Message({ prompt, answer }) {
     if (isPlaying && audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      window.speechSynthesis?.cancel();
       setIsPlaying(false);
       return;
     }
@@ -666,6 +669,8 @@ function Message({ prompt, answer }) {
 
     setIsLoadingAudio(true);
     setAudioError("");
+    setAudioReady(false);
+    releaseAudioUrl();
     try {
       const response = await fetch("/api/tts", {
         method: "POST",
@@ -673,8 +678,17 @@ function Message({ prompt, answer }) {
         body: JSON.stringify({ text: answer, voice: "af_bella" }),
       });
       if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.detail || "Failed to generate audio.");
+        const body = await response.text().catch(() => "");
+        let detail = body.trim();
+        try {
+          const payload = JSON.parse(body);
+          detail = payload.detail || detail;
+        } catch {
+          // Render/proxy errors are often plain text or HTML rather than JSON.
+        }
+        throw new Error(
+          detail || `TTS request failed with HTTP ${response.status}.`,
+        );
       }
 
       const blob = await response.blob();
@@ -682,20 +696,43 @@ function Message({ prompt, answer }) {
         throw new Error("The TTS service returned an empty audio file.");
       }
 
-      releaseAudioUrl();
       const url = URL.createObjectURL(blob);
       audioUrlRef.current = url;
       audioRef.current.src = url;
+      audioRef.current.load();
+      setAudioReady(true);
       audioRef.current.onended = () => setIsPlaying(false);
       audioRef.current.onerror = () => {
         setIsPlaying(false);
         setAudioError("The browser could not play the generated audio.");
       };
-      await audioRef.current.play();
-      setIsPlaying(true);
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (playError) {
+        if (playError?.name === "NotAllowedError") {
+          setAudioError("Audio generated. Press play in the audio controls below.");
+        } else {
+          throw playError;
+        }
+      }
     } catch (error) {
       console.error(error);
-      setAudioError(error instanceof Error ? error.message : "Could not play audio.");
+      const serverError = error instanceof Error ? error.message : "Could not generate server audio.";
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        const utterance = new SpeechSynthesisUtterance(answer);
+        utterance.onend = () => setIsPlaying(false);
+        utterance.onerror = (event) => {
+          setIsPlaying(false);
+          setAudioError(`Browser speech failed${event.error ? `: ${event.error}` : "."}`);
+        };
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+        setIsPlaying(true);
+        setAudioError(`Server audio unavailable; using your browser voice. ${serverError}`);
+      } else {
+        setAudioError(serverError);
+      }
     } finally {
       setIsLoadingAudio(false);
     }
@@ -733,7 +770,13 @@ function Message({ prompt, answer }) {
           {audioError && <div className="audio-error" role="status">{audioError}</div>}
         </div>
       </div>
-      <audio ref={audioRef} style={{ display: "none" }} />
+      <audio
+        ref={audioRef}
+        className="tts-audio"
+        controls={audioReady}
+        preload="metadata"
+        aria-label="Generated response audio"
+      />
     </motion.div>
   );
 }
