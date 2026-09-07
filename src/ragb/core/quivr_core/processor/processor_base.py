@@ -1,9 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Generic, List, TypeVar
 
-from attr import dataclass
 from langchain_core.documents import Document
 
 from quivr_core.files.file import FileExtension, QuivrFile

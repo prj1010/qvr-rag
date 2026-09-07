@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, AsyncIterable, Self
 from uuid import UUID, uuid4
 
 import aiofiles
-from openai import BaseModel
+from pydantic import BaseModel
 
 
 class QuivrFileSerialized(BaseModel):
