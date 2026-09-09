@@ -42,7 +42,6 @@ from quivr_core.rag.entities.models import (
 )
 from quivr_core.rag.prompts import TemplatePromptName, custom_prompts
 from quivr_core.rag.utils import (
-    LangfuseService,
     collect_tools,
     combine_documents,
     format_dict,
@@ -52,9 +51,6 @@ from quivr_core.rag.utils import (
 )
 
 logger = logging.getLogger("quivr_core")
-
-langfuse_service = LangfuseService()
-langfuse_handler = langfuse_service.get_handler()
 
 
 def _latest_user_message(messages: Sequence[BaseMessage]) -> str:
@@ -1130,7 +1126,6 @@ class QuivrQARAGLangGraph:
             config={
                 "run_id": run_id,
                 "metadata": metadata.model_dump() if metadata else {},
-                "callbacks": [langfuse_handler],
             },
         ):
             node_name = self._extract_node_name(event)
@@ -1166,9 +1161,6 @@ class QuivrQARAGLangGraph:
         chunk_metadata = get_chunk_metadata(rolling_message, docs)
         if metadata:
             chunk_metadata.langchain_metadata = metadata
-            chunk_metadata.langchain_metadata.langfuse_trace_url = (
-                langfuse_handler.get_trace_url()
-            )
 
         yield ParsedRAGChunkResponse(
             answer="",

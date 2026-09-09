@@ -52,7 +52,7 @@ if exist "%QUIVR_CORE_PATH%\pyproject.toml" (
 if errorlevel 1 exit /b 1
 
 echo Installing the React API server...
-uv pip install --python "%PY%" --upgrade "fastapi>=0.115,<1" "python-multipart>=0.0.20,<1" "uvicorn[standard]>=0.34,<1" "authlib>=1.3,<2" "itsdangerous>=2.2,<3" "langfuse>=2.57,<3"
+uv pip install --python "%PY%" --upgrade "pydantic>=2.8.2,<3" "fastapi>=0.115,<1" "python-multipart>=0.0.20,<1" "uvicorn[standard]>=0.34,<1" "authlib>=1.3,<2" "itsdangerous>=2.2,<3" "logfire[fastapi]>=5.0,<6"
 if errorlevel 1 exit /b 1
 
 echo Installing document parsing and TTS dependencies...
@@ -65,12 +65,10 @@ echo Applying compatible dependency pins...
 uv pip install --python "%PY%" --upgrade "langchain-core>=0.3.85,<0.4" "packaging>=23.2,<25"
 if errorlevel 1 exit /b 1
 
-echo Installing the pinned Microsoft Agent Governance Toolkit fork...
-set "AGT_SHA=359a2332f57d9000924baba269ed24e4e15ad8b0"
-rem The full core bundle includes a Rust-backed Linux wheel. Windows uses the
-rem direct forked RAG governance package, which contains all controls used by
-rem this UI, without requiring a Visual Studio linker.
-uv pip install --python "%PY%" --upgrade "agent-rag-governance @ git+https://github.com/prj1010/agent-governance-toolkit.git@%AGT_SHA%#subdirectory=agent-governance-python/agent-rag-governance"
+echo Installing the Microsoft Agent Governance Toolkit from PyPI...
+rem The unified package is a public preview. The separate RAG package supplies
+rem the documented RAGGovernor/RAGPolicy enforcement used by this UI.
+uv pip install --python "%PY%" --upgrade "agent-governance-toolkit[full]==4.1.0" "agent-rag-governance==5.0.0"
 if errorlevel 1 exit /b 1
 
 echo Installing the combined UI package in editable mode...

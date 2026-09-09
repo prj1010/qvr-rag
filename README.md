@@ -299,10 +299,10 @@ safe metadata for `rag.index`, `memory.recall`, `rag.ask`, and `tts.synthesis`,
 including nested retrieval, embedding, generation, and TTS spans. Prompt,
 answer, and document content are not captured by default.
 
-Tracing uses [Langfuse](https://langfuse.com/), an open-source/self-hostable
-platform included in the [awesome-agent-observability catalog](https://github.com/anhermon/awesome-agent-observability).
-Without Langfuse credentials, the console still provides a bounded local trace
-buffer for the current process.
+Tracing uses [Pydantic Logfire](https://pydantic.dev/logfire), with OpenTelemetry
+instrumentation for FastAPI, Pydantic, LangChain, and LangGraph. Without a
+Logfire token, the console still provides a bounded local trace buffer for the
+current process.
 
 ### Microsoft SSO setup
 
@@ -322,8 +322,8 @@ buffer for the current process.
 
    `ADMIN_EMAILS` is an explicit allowlist. Authentication alone does not grant
    access to the admin console.
-4. Set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` if
-   traces should be exported to Langfuse. Keep
+4. Set `LOGFIRE_TOKEN` and `LOGFIRE_SEND_TO_LOGFIRE=true` if traces should be
+   exported to Logfire. Keep
    `OBSERVABILITY_CAPTURE_CONTENT=false` unless trace content has been reviewed
    for privacy and compliance.
 5. Deploy, then select **Admin observability** in the app header. Unauthenticated
@@ -346,19 +346,18 @@ session-protected admin console, but it is disabled by default and should be
 turned off as soon as Entra SSO is configured. The token is never placed in a
 URL or written to the AGT audit log.
 
-## Agent Governance Toolkit fork
+## Agent Governance Toolkit
 
 The admin console also exposes the retrieval governance layer from the
-[project fork](https://github.com/prj1010/agent-governance-toolkit), pinned to
-commit `359a2332f57d9000924baba269ed24e4e15ad8b0`. The packages are installed
-directly from their monorepo subdirectories, so a similarly named PyPI package
-cannot silently replace the fork.
+[official Agent Governance Toolkit](https://pypi.org/project/agent_governance_toolkit/).
+The unified `agent-governance-toolkit[full]` package is a public preview and
+provides the core governance stack. The separately published
+[agent-rag-governance](https://pypi.org/project/agent-rag-governance/) package
+provides the documented `RAGGovernor`/`RAGPolicy` retrieval enforcement used
+by this app.
 
-On Linux/Render the requirements also install the fork's `core[full]` bundle.
-On Windows, `setup.cmd` installs the forked `agent-rag-governance` package and
-the controls used by this app; the optional core bundle is skipped because its
-Rust-backed ACS dependency currently publishes a manylinux wheel rather than a
-Windows wheel.
+Both packages are pinned to the versions validated by this app because the
+unified toolkit is still a public preview.
 
 The policy protects every Quivr retriever with collection allow/deny rules,
 rate limiting, PII and prompt-injection scanning, and privacy-safe audit

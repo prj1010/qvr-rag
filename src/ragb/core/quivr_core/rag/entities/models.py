@@ -63,10 +63,10 @@ class RawRAGResponse(TypedDict):
 
 
 class LangchainMetadata(BaseModel):
-    langfuse_trace_id: str | None = None
-    langfuse_trace_url: str | None = None
-    langfuse_session_id: str | None = None
-    langfuse_user_id: str | None = None
+    trace_id: str | None = None
+    trace_url: str | None = None
+    session_id: str | None = None
+    user_id: str | None = None
 
 
 class ChatLLMMetadata(BaseModel):

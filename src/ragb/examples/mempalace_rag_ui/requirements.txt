@@ -6,6 +6,7 @@
 # ============================================================
 
 # --- Web server ---
+pydantic>=2.8.2,<3
 fastapi>=0.115,<1
 uvicorn[standard]>=0.34,<1
 python-multipart>=0.0.20,<1
@@ -28,12 +29,11 @@ quivr-core>=0.0.33,<0.1
 # --- MemPalace long-term memory ---
 quivr-mempalace>=0.1.0
 
-# --- Microsoft Agent Governance Toolkit (project fork, pinned for reproducible builds) ---
-# The repository is a monorepo; each direct reference must target its package
-# subdirectory. The pinned commit is prj1010/agent-governance-toolkit main.
-# The full core bundle is enabled on Linux/Render; RAG governance works on Windows.
-agent-governance-toolkit-core[full] @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-governance-toolkit-core ; sys_platform == "linux"
-agent-rag-governance @ git+https://github.com/prj1010/agent-governance-toolkit.git@359a2332f57d9000924baba269ed24e4e15ad8b0#subdirectory=agent-governance-python/agent-rag-governance
+# --- Microsoft Agent Governance Toolkit ---
+# The unified package is a public preview; the RAG package supplies the
+# documented RAGGovernor/RAGPolicy retrieval enforcement used by this app.
+agent-governance-toolkit[full]==4.1.0
+agent-rag-governance==5.0.0
 
 # --- Voice / TTS (Kokoro) ---
 kokoro-onnx>=0.6.1,<0.7
@@ -61,7 +61,7 @@ torchvision>=0.17,<1
 sqlite-vec>=0.1.9,<0.2
 
 # --- Observability ---
-langfuse>=2.57,<3
+logfire[fastapi]>=5.0,<6
 
 # --- Utilities ---
 python-dotenv>=1.0

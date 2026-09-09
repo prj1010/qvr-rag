@@ -2,13 +2,13 @@ import logging
 import os
 import re
 from enum import Enum
-from typing import Any, Dict, Hashable, List, Optional, Type, Union
+from typing import Any, Dict, Hashable, List, Optional, Self, Type, Union
 from uuid import UUID
 
 from langchain_core.prompts.base import BasePromptTemplate
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from rapidfuzz import fuzz, process
 
 from quivr_core.base_config import QuivrBaseConfig
@@ -342,10 +342,11 @@ class LLMEndpointConfig(QuivrBaseConfig):
     def fallback_tokenizer(self) -> str:
         return self._FALLBACK_TOKENIZER
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def _configure_model(self) -> Self:
         self.set_llm_model_config()
         self.set_api_key()
+        return self
 
     def set_api_key(self, force_reset: bool = False):
         if not self.supplier:
@@ -438,7 +439,6 @@ class LLMEndpointConfig(QuivrBaseConfig):
                 )
 
 
-# Cannot use Pydantic v2 field_validator because of conflicts with pydantic v1 still in use in LangChain
 class RerankerConfig(QuivrBaseConfig):
     supplier: DefaultRerankers | None = None
     model: str | None = None
@@ -447,11 +447,8 @@ class RerankerConfig(QuivrBaseConfig):
     relevance_score_threshold: float | None = None
     relevance_score_key: str = "relevance_score"
 
-    def __init__(self, **data):
-        super().__init__(**data)  # Call Pydantic's BaseModel init
-        self.validate_model()  # Automatically call external validation
-
-    def validate_model(self):
+    @model_validator(mode="after")
+    def validate_model(self) -> Self:
         # If model is not provided, get default model based on supplier
         if self.model is None and self.supplier is not None:
             self.model = self.supplier.default_model
@@ -466,15 +463,17 @@ class RerankerConfig(QuivrBaseConfig):
                     f"The API key for supplier '{self.supplier}' is not set. "
                     f"Please set the environment variable: {api_key_var}"
                 )
+        return self
 
 
 class ConditionalEdgeConfig(QuivrBaseConfig):
     routing_function: str
     conditions: Union[list, Dict[Hashable, str]]
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def _resolve_edges(self) -> Self:
         self.resolve_special_edges()
+        return self
 
     def resolve_special_edges(self):
         """Replace SpecialEdges enum values with their corresponding langgraph values."""
@@ -503,10 +502,11 @@ class NodeConfig(QuivrBaseConfig):
     tools: List[Dict[str, Any]] | None = None
     instantiated_tools: List[BaseTool | Type] | None = None
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def _initialize_node(self) -> Self:
         self._instantiate_tools()
         self.resolve_special_edges_in_name_and_edges()
+        return self
 
     def resolve_special_edges_in_name_and_edges(self):
         """Replace SpecialEdges enum values in name and edges with corresponding langgraph values."""
@@ -525,10 +525,13 @@ class NodeConfig(QuivrBaseConfig):
     def _instantiate_tools(self):
         """Instantiate tools based on the configuration."""
         if self.tools:
-            self.instantiated_tools = [
-                LLMToolFactory.create_tool(tool_config.pop("name"), tool_config)
-                for tool_config in self.tools
-            ]
+            self.instantiated_tools = []
+            for tool_config in self.tools:
+                tool_config_copy = dict(tool_config)
+                tool_name = tool_config_copy.pop("name")
+                self.instantiated_tools.append(
+                    LLMToolFactory.create_tool(tool_name, tool_config_copy)
+                )
 
 
 class DefaultWorkflow(str, Enum):
@@ -551,15 +554,16 @@ class DefaultWorkflow(str, Enum):
 
 class WorkflowConfig(QuivrBaseConfig):
     name: str | None = None
-    nodes: List[NodeConfig] = []
+    nodes: List[NodeConfig] = Field(default_factory=list)
     available_tools: List[str] | None = None
-    validated_tools: List[BaseTool | Type] = []
-    activated_tools: List[BaseTool | Type] = []
+    validated_tools: List[BaseTool | Type] = Field(default_factory=list)
+    activated_tools: List[BaseTool | Type] = Field(default_factory=list)
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def _validate_workflow(self) -> Self:
         self.check_first_node_is_start()
         self.validate_available_tools()
+        return self
 
     def check_first_node_is_start(self):
         if self.nodes and self.nodes[0].name != START:
@@ -595,28 +599,31 @@ class WorkflowConfig(QuivrBaseConfig):
 
 
 class RetrievalConfig(QuivrBaseConfig):
-    reranker_config: RerankerConfig = RerankerConfig()
-    llm_config: LLMEndpointConfig = LLMEndpointConfig()
+    reranker_config: RerankerConfig = Field(default_factory=RerankerConfig)
+    llm_config: LLMEndpointConfig = Field(default_factory=LLMEndpointConfig)
     max_history: int = 10
     max_files: int = 20
     k: int = 40  # Number of chunks returned by the retriever
     prompt: str | None = None
-    workflow_config: WorkflowConfig = WorkflowConfig(nodes=DefaultWorkflow.RAG.nodes)
+    workflow_config: WorkflowConfig = Field(
+        default_factory=lambda: WorkflowConfig(nodes=DefaultWorkflow.RAG.nodes)
+    )
 
-    def __init__(self, **data):
-        super().__init__(**data)
+    @model_validator(mode="after")
+    def _configure_llm(self) -> Self:
         self.llm_config.set_api_key(force_reset=True)
+        return self
 
 
 class ParserConfig(QuivrBaseConfig):
-    splitter_config: SplitterConfig = SplitterConfig()
-    megaparse_config: MegaparseConfig = MegaparseConfig()
+    splitter_config: SplitterConfig = Field(default_factory=SplitterConfig)
+    megaparse_config: MegaparseConfig = Field(default_factory=MegaparseConfig)
 
 
 class IngestionConfig(QuivrBaseConfig):
-    parser_config: ParserConfig = ParserConfig()
+    parser_config: ParserConfig = Field(default_factory=ParserConfig)
 
 
 class AssistantConfig(QuivrBaseConfig):
-    retrieval_config: RetrievalConfig = RetrievalConfig()
-    ingestion_config: IngestionConfig = IngestionConfig()
+    retrieval_config: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    ingestion_config: IngestionConfig = Field(default_factory=IngestionConfig)

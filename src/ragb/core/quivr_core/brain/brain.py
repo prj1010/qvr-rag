@@ -240,7 +240,7 @@ class Brain:
 
         if isinstance(self.embedder, OpenAIEmbeddings):
             embedder_config = EmbedderConfig(
-                config=self.embedder.dict(exclude={"openai_api_key"})
+                config=self.embedder.model_dump(exclude={"openai_api_key"})
             )
         else:
             raise Exception("can't serialize embedder other than openai for now")
@@ -548,9 +548,9 @@ class Brain:
         full_answer = ""
 
         metadata = LangchainMetadata(
-            langfuse_trace_id=str(run_id),
-            langfuse_user_id=str(self.workspace_id),
-            langfuse_session_id=str(self.chat_id),
+            trace_id=str(run_id),
+            user_id=str(self.workspace_id),
+            session_id=str(self.chat_id),
         )
 
         async for response in rag_instance.answer_astream(

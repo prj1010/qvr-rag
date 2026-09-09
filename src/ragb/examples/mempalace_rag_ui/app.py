@@ -18,6 +18,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from observability import OBSERVABILITY, content_metadata
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +29,6 @@ import uvicorn
 
 from admin_auth import ADMIN_AUTH
 from governance import apply_governance, evaluate_governance, governance_snapshot
-from observability import OBSERVABILITY, content_metadata
 from model_catalog import MODEL_CATALOG, model_catalog_response
 from ocr import (
     OlgaRequiresOcrError,
@@ -704,6 +704,7 @@ app = FastAPI(
     version="0.2.0",
     description="Document RAG and long-term memory API for the React frontend.",
 )
+OBSERVABILITY.instrument_fastapi(app)
 ADMIN_AUTH.install_session_middleware(app)
 FRONTEND_DIST = APP_DIR / "frontend" / "dist"
 PACKAGED_FRONTEND_DIST = APP_DIR / "quivr_mempalace_rag_ui" / "static"

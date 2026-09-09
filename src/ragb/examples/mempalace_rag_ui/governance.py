@@ -1,9 +1,9 @@
 """Microsoft Agent Governance Toolkit integration for the Quivr RAG path.
 
-The forked toolkit deliberately disables its asynchronous ``ainvoke`` method
-on governed retrievers so callers cannot accidentally bypass governance. Quivr
-uses LangChain's async retriever API internally, so this module adapts that
-call to the toolkit's synchronous ``invoke`` method in a worker thread.
+The toolkit documents its governed retriever through the synchronous
+``invoke`` method. Quivr uses LangChain's async retriever API internally, so
+this module adapts that call to the governed synchronous method in a worker
+thread and keeps governance in the critical path.
 """
 
 from __future__ import annotations
@@ -90,8 +90,8 @@ def _create_runtime() -> GovernanceRuntime:
         from agent_rag_governance import RAGGovernor, RAGPolicy
     except ImportError as exc:
         raise RuntimeError(
-            "Agent Governance Toolkit is not installed. Run the pinned fork "
-            "installation from requirements.txt."
+            "Agent Governance Toolkit is not installed. Run the installation "
+            "from requirements.txt."
         ) from exc
 
     agent_id = os.getenv("AGT_AGENT_ID", "mempalace-quivr").strip() or "mempalace-quivr"
@@ -283,30 +283,51 @@ def evaluate_governance(collection: str, text: str) -> dict[str, Any]:
 
     collection = collection.strip() or runtime.collection
     reasons: list[str] = []
+    warnings: list[str] = []
     collection_allowed, collection_reason = runtime.policy.is_collection_allowed(collection)
     if not collection_allowed:
         detail = f" ({collection_reason})" if collection_reason else ""
         reasons.append(f"Collection '{collection}' is not allowed by policy{detail}.")
 
+    content_scan = "not_requested"
     if text.strip():
         try:
             from agent_rag_governance import ContentScanner
-
-            scan_results = ContentScanner(runtime.policy.content_policies).scan([text])
-            blocked_result = next(
-                (result for result in scan_results if getattr(result, "blocked", False)),
-                None,
+        except (ImportError, AttributeError):
+            # The public RAG governor performs chunk scanning during invoke(),
+            # while some toolkit builds do not expose a standalone scanner.
+            # Do not turn that optional dry-run limitation into a false deny.
+            content_scan = "runtime_only"
+            warnings.append(
+                "Content policy scanning will run during governed retrieval; "
+                "the installed toolkit has no standalone dry-run scanner."
             )
-            if blocked_result is not None:
-                category = getattr(blocked_result, "category", None) or "content policy"
-                reasons.append(f"Blocked by {category}.")
-        except ImportError:
-            reasons.append("Content scanner is unavailable in the installed toolkit.")
+        else:
+            try:
+                scan_results = ContentScanner(runtime.policy.content_policies).scan([text])
+            except Exception as exc:  # pragma: no cover - depends on toolkit build
+                LOGGER.warning("AGT content dry-run unavailable: %s", exc)
+                content_scan = "runtime_only"
+                warnings.append(
+                    "Content policy scanning will run during governed retrieval; "
+                    "the standalone dry-run scanner could not be used."
+                )
+            else:
+                content_scan = "available"
+                blocked_result = next(
+                    (result for result in scan_results if getattr(result, "blocked", False)),
+                    None,
+                )
+                if blocked_result is not None:
+                    category = getattr(blocked_result, "category", None) or "content policy"
+                    reasons.append(f"Blocked by {category}.")
 
     return {
         "enabled": True,
         "decision": "deny" if reasons else "allow",
         "collection": collection,
         "text_chars": len(text),
+        "content_scan": content_scan,
         "reasons": reasons,
+        "warnings": warnings,
     }

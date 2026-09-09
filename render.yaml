@@ -72,12 +72,16 @@ services:
         sync: false
       - key: ADMIN_FALLBACK_EMAIL
         value: fallback-admin@local
-      - key: LANGFUSE_PUBLIC_KEY
+      - key: LOGFIRE_TOKEN
         sync: false
-      - key: LANGFUSE_SECRET_KEY
+      - key: LOGFIRE_SEND_TO_LOGFIRE
+        value: "true"
+      - key: LOGFIRE_SERVICE_NAME
+        value: quivr-mempalace-rag
+      - key: LOGFIRE_PROJECT_URL
         sync: false
-      - key: LANGFUSE_HOST
-        value: https://cloud.langfuse.com
+      - key: LOGFIRE_INSTRUMENT_PYDANTIC
+        value: "true"
       - key: OBSERVABILITY_CAPTURE_CONTENT
         value: "false"
       - key: AGT_AGENT_ID

@@ -1,4 +1,4 @@
-"""Low-overhead RAG tracing with an optional Langfuse exporter.
+"""Low-overhead RAG tracing with optional Pydantic Logfire export.
 
 The local recorder intentionally stores metadata rather than prompts, answers, or
 uploaded document contents by default.  This makes the admin console useful in a
@@ -30,6 +30,39 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configure_logfire() -> Any | None:
+    """Configure Logfire without making telemetry a product-path dependency."""
+
+    # LangChain/LangGraph expose their OpenTelemetry spans through these
+    # settings. They must be present before LangChain is imported.
+    for name in ("LANGSMITH_OTEL_ENABLED", "LANGSMITH_OTEL_ONLY", "LANGSMITH_TRACING"):
+        os.environ.setdefault(name, "true")
+
+    try:
+        import logfire
+    except ImportError:
+        return None
+
+    send_setting: bool | str = "if-token-present"
+    if os.getenv("LOGFIRE_SEND_TO_LOGFIRE") is not None:
+        send_setting = _bool_env("LOGFIRE_SEND_TO_LOGFIRE")
+
+    try:
+        logfire.configure(
+            send_to_logfire=send_setting,
+            service_name=os.getenv("LOGFIRE_SERVICE_NAME", "quivr-mempalace-rag"),
+        )
+        instrument_pydantic = getattr(logfire, "instrument_pydantic", None)
+        if callable(instrument_pydantic) and _bool_env(
+            "LOGFIRE_INSTRUMENT_PYDANTIC", True
+        ):
+            instrument_pydantic()
+        return logfire
+    except Exception as exc:  # telemetry must never break the product path
+        print(f"Logfire initialization skipped: {type(exc).__name__}: {exc}")
+        return None
 
 
 def _safe_value(value: Any) -> Any:
@@ -122,14 +155,14 @@ class TraceContext:
         )
         self._started = time.perf_counter()
         self._token: Token[TraceContext | None] | None = None
-        self._langfuse_trace: Any | None = None
+        self._logfire_trace: Any | None = None
 
     def __enter__(self) -> TraceContext:
         self._token = _CURRENT_TRACE.set(self)
-        self._langfuse_trace = self.recorder._start_langfuse_trace(
-            self.record.name,
-            self.record.attributes,
+        self._logfire_trace = self.recorder._start_logfire_span(
+            self.record.name, self.record.attributes
         )
+        self.recorder._enter_logfire_context(self._logfire_trace)
         return self
 
     @contextlib.contextmanager
@@ -147,42 +180,46 @@ class TraceContext:
             attributes=_safe_attributes(attributes),
         )
         started = time.perf_counter()
-        langfuse_span = self.recorder._start_langfuse_span(
-            self._langfuse_trace,
-            name,
-            kind,
-            record.attributes,
+        logfire_span = self.recorder._start_logfire_span(name, record.attributes)
+        self.recorder._enter_logfire_context(logfire_span)
+        error_info: tuple[type[BaseException] | None, BaseException | None, Any] = (
+            None,
+            None,
+            None,
         )
         try:
             yield record
-        except Exception as exc:
+        except BaseException as exc:
             record.status = "error"
             record.error = f"{type(exc).__name__}: {exc}"[:240]
+            error_info = (type(exc), exc, exc.__traceback__)
             raise
         finally:
             record.duration_ms = (time.perf_counter() - started) * 1000
             self.record.spans.append(record)
-            self.recorder._finish_langfuse_span(langfuse_span, record)
+            self.recorder._exit_logfire_context(logfire_span, error_info)
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         self.record.duration_ms = (time.perf_counter() - self._started) * 1000
         if exc is not None:
             self.record.status = "error"
             self.record.error = f"{exc_type.__name__}: {exc}"[:240]
-        self.recorder._finish_langfuse_trace(self._langfuse_trace, self.record)
+        self.recorder._exit_logfire_context(
+            self._logfire_trace,
+            (exc_type, exc, traceback),
+        )
         self.recorder._store(self.record)
         if self._token is not None:
             _CURRENT_TRACE.reset(self._token)
 
 
 class Observability:
-    """Record recent traces locally and export them to Langfuse when configured."""
+    """Record recent traces locally and export them to Pydantic Logfire."""
 
     def __init__(self, max_traces: int = 100) -> None:
         self._traces: deque[TraceRecord] = deque(maxlen=max_traces)
         self._lock = Lock()
-        self._langfuse: Any | None = None
-        self._langfuse_attempted = False
+        self._logfire = _configure_logfire()
 
     def start_trace(
         self,
@@ -206,95 +243,55 @@ class Observability:
         with self._lock:
             self._traces.appendleft(trace)
 
-    def _get_langfuse(self) -> Any | None:
-        if self._langfuse_attempted:
-            return self._langfuse
-        self._langfuse_attempted = True
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
-        if not public_key or not secret_key:
+    def _start_logfire_span(
+        self, name: str, attributes: dict[str, Any]
+    ) -> Any | None:
+        if self._logfire is None:
             return None
         try:
-            from langfuse import Langfuse
-
-            host = os.getenv(
-                "LANGFUSE_HOST",
-                os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
-            ).strip()
-            self._langfuse = Langfuse(
-                public_key=public_key,
-                secret_key=secret_key,
-                host=host,
-            )
+            return self._logfire.span(name, **attributes)
         except Exception as exc:  # telemetry must never break the product path
-            print(f"Langfuse initialization skipped: {type(exc).__name__}: {exc}")
-        return self._langfuse
-
-    def _start_langfuse_trace(
-        self,
-        name: str,
-        attributes: dict[str, Any],
-    ) -> Any | None:
-        client = self._get_langfuse()
-        if client is None:
-            return None
-        try:
-            return client.trace(name=name, input=attributes, metadata={"app": "mempalace-quivr"})
-        except Exception as exc:
-            print(f"Langfuse trace skipped: {type(exc).__name__}: {exc}")
-            return None
-
-    def _start_langfuse_span(
-        self,
-        trace: Any | None,
-        name: str,
-        kind: str,
-        attributes: dict[str, Any],
-    ) -> Any | None:
-        if trace is None:
-            return None
-        try:
-            if kind == "generation":
-                model = attributes.get("model")
-                kwargs: dict[str, Any] = {"name": name, "input": attributes}
-                if model:
-                    kwargs["model"] = model
-                return trace.generation(**kwargs)
-            return trace.span(name=name, input=attributes)
-        except Exception as exc:
-            print(f"Langfuse span skipped: {type(exc).__name__}: {exc}")
+            print(f"Logfire span skipped: {type(exc).__name__}: {exc}")
             return None
 
     @staticmethod
-    def _finish_langfuse_span(span: Any | None, record: SpanRecord) -> None:
-        if span is None:
+    def _enter_logfire_context(context: Any | None) -> None:
+        if context is None:
             return
         try:
-            span.end(
-                output={"status": record.status, "duration_ms": round(record.duration_ms, 2)},
-                metadata=record.attributes,
-            )
-        except Exception:
-            try:
-                span.end()
-            except Exception:
-                pass
-
-    @staticmethod
-    def _finish_langfuse_trace(trace: Any | None, record: TraceRecord) -> None:
-        if trace is None:
-            return
-        try:
-            trace.update(
-                output={"status": record.status, "duration_ms": round(record.duration_ms, 2)},
-            )
+            context.__enter__()
         except Exception:
             pass
 
+    @staticmethod
+    def _exit_logfire_context(
+        context: Any | None,
+        error_info: tuple[type[BaseException] | None, BaseException | None, Any],
+    ) -> None:
+        if context is None:
+            return
+        try:
+            context.__exit__(*error_info)
+        except Exception:
+            pass
+
+    def instrument_fastapi(self, app: Any) -> None:
+        """Instrument FastAPI when the optional Logfire SDK is available."""
+
+        if self._logfire is None:
+            return
+        try:
+            self._logfire.instrument_fastapi(app)
+        except Exception as exc:
+            print(f"Logfire FastAPI instrumentation skipped: {type(exc).__name__}: {exc}")
+
     def flush(self) -> None:
-        if self._langfuse is not None:
+        if self._logfire is None:
+            return
+        force_flush = getattr(self._logfire, "force_flush", None)
+        if callable(force_flush):
             try:
-                self._langfuse.flush()
+                force_flush()
             except Exception:
                 pass
 
@@ -321,11 +318,11 @@ class Observability:
             },
             "traces": traces,
             "integrations": {
-                "langfuse_configured": self._get_langfuse() is not None,
-                "langfuse_host": os.getenv(
-                    "LANGFUSE_HOST",
-                    os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
+                "logfire_configured": self._logfire is not None,
+                "logfire_send_to_logfire": _bool_env(
+                    "LOGFIRE_SEND_TO_LOGFIRE", bool(os.getenv("LOGFIRE_TOKEN"))
                 ),
+                "logfire_project_url": os.getenv("LOGFIRE_PROJECT_URL", ""),
                 "content_capture": _bool_env("OBSERVABILITY_CAPTURE_CONTENT"),
             },
         }

@@ -508,7 +508,7 @@ function AdminConsole({ onBack }) {
           <button className="back-button" type="button" onClick={onBack}><ArrowLeft size={15} /> Back to workspace</button>
           <div className="eyebrow"><Activity size={14} /> Open-source RAG observability</div>
           <h1>See every <span>decision.</span></h1>
-          <p className="hero-copy">Trace retrieval, memory, model generation, and TTS as one operational story. Content capture is off by default; Langfuse receives safe metadata unless you explicitly opt in.</p>
+          <p className="hero-copy">Trace retrieval, memory, model generation, and TTS as one operational story. Content capture is off by default; Logfire receives safe metadata only when enabled.</p>
         </section>
 
         {error && <div className="status-banner error"><AlertTriangle size={14} /> {error}</div>}
@@ -516,7 +516,7 @@ function AdminConsole({ onBack }) {
           <StatCard icon={<Activity size={18} />} label="Traces in memory" value={summary.total_traces ?? "—"} detail="Most recent 100" accent="violet" />
           <StatCard icon={<Clock3 size={18} />} label="P95 latency" value={formatDuration(summary.p95_latency_ms)} detail={`Average ${formatDuration(summary.avg_latency_ms)}`} accent="cyan" />
           <StatCard icon={<AlertTriangle size={18} />} label="Error rate" value={formatPercent(summary.error_rate)} detail={`${summary.error_traces || 0} failed traces`} accent="amber" />
-          <StatCard icon={<ShieldCheck size={18} />} label="Trace export" value={integrations.langfuse_configured ? "Langfuse live" : "Local only"} detail={integrations.content_capture ? "Content capture on" : "Metadata only"} accent="green" />
+          <StatCard icon={<ShieldCheck size={18} />} label="Trace export" value={integrations.logfire_configured && integrations.logfire_send_to_logfire ? "Logfire live" : "Local only"} detail={integrations.content_capture ? "Content capture on" : "Metadata only"} accent="green" />
         </section>
 
         <div className="admin-grid">
@@ -543,7 +543,7 @@ function AdminConsole({ onBack }) {
           <section className="panel detail-panel">
             <div className="panel-heading">
               <div><div className="section-kicker"><ShieldCheck size={14} /> Trace detail</div><h2>{selectedTrace?.name || "No trace selected"}</h2></div>
-              {integrations.langfuse_configured && <button className="text-button" type="button" onClick={() => window.open(integrations.langfuse_host, "_blank", "noopener,noreferrer")}><ExternalLink size={13} /> Langfuse</button>}
+              {integrations.logfire_project_url && <button className="text-button" type="button" onClick={() => window.open(integrations.logfire_project_url, "_blank", "noopener,noreferrer")}><ExternalLink size={13} /> Logfire</button>}
             </div>
             {selectedTrace ? (
               <>
@@ -601,12 +601,12 @@ function AdminConsole({ onBack }) {
               <label htmlFor="governance-text">Query text</label>
               <textarea id="governance-text" rows="4" value={governanceInput.text} onChange={(event) => setGovernanceInput((current) => ({ ...current, text: event.target.value }))} placeholder="Try a normal query or a policy-sensitive string…" />
               <button className="secondary-button" type="submit" disabled={isEvaluatingGovernance}>{isEvaluatingGovernance ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />} {isEvaluatingGovernance ? "Checking…" : "Evaluate retrieval"}</button>
-              {governanceResult && <div className={`governance-result ${governanceResult.decision}`}><strong>{governanceResult.decision}</strong>{governanceResult.reasons?.length ? <span>{governanceResult.reasons.join(" ")}</span> : <span>No policy violations detected.</span>}</div>}
+              {governanceResult && <div className={`governance-result ${governanceResult.decision}`}><strong>{governanceResult.decision}</strong>{governanceResult.reasons?.length ? <span>{governanceResult.reasons.join(" ")}</span> : governanceResult.warnings?.length ? <span>{governanceResult.warnings.join(" ")}</span> : <span>No policy violations detected.</span>}</div>}
             </form>
           </div>
         </section>
       </main>
-      <footer className="footer"><span>Microsoft Entra protected</span><span className="footer-divider" /><span>Langfuse-compatible traces <b>·</b> safe metadata by default</span></footer>
+      <footer className="footer"><span>Microsoft Entra protected</span><span className="footer-divider" /><span>Logfire traces <b>·</b> safe metadata by default</span></footer>
     </div>
   );
 }

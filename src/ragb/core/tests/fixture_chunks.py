@@ -43,7 +43,7 @@ async def main():
             ):
                 chunk = event["data"]["chunk"]
                 dict_chunk = {
-                    k: v.dict() if isinstance(v, AIMessageChunk) else v
+                    k: v.model_dump() if isinstance(v, AIMessageChunk) else v
                     for k, v in chunk.items()
                 }
                 f.write(json.dumps(dict_chunk) + "\n")

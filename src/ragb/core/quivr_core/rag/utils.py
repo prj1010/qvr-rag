@@ -4,8 +4,6 @@ from typing import Any, Dict, List, Tuple, no_type_check
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages.ai import AIMessageChunk
 from langchain_core.prompts import format_document
-from langfuse.callback import CallbackHandler
-
 from quivr_core.rag.entities.config import WorkflowConfig
 from quivr_core.rag.entities.models import (
     ChatLLMMetadata,
@@ -200,11 +198,3 @@ def collect_tools(workflow_config: WorkflowConfig):
 
 def format_dict(kv: Dict[str, str]) -> str:
     return "\n".join([f"{k}: {v}" for k, v in kv.items() if v is not None and v != ""])
-
-
-class LangfuseService:
-    def __init__(self):
-        self.langfuse_handler = CallbackHandler()
-
-    def get_handler(self):
-        return self.langfuse_handler

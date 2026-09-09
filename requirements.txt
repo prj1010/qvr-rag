@@ -1,0 +1,13 @@
+# Project-level installation for the Quivr + MemPalace RAG application.
+# Python 3.11 or newer is required.
+#
+# Install from the repository root with:
+#   python -m pip install -r requirements.txt
+
+# Use the repository's Pydantic v2 Quivr Core and local MemPalace package.
+-e ./src/ragb/core
+-e ./examples/mempalace_quivr
+
+# Web app, Logfire, Agent Governance Toolkit, model providers, OCR, and
+# storage dependencies.
+-r ./src/ragb/examples/mempalace_rag_ui/requirements.txt

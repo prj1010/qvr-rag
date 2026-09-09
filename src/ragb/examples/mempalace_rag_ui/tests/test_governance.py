@@ -1,3 +1,4 @@
+import asyncio
 import os
 import unittest
 from types import SimpleNamespace
@@ -42,6 +43,48 @@ class GovernanceIsolationTests(unittest.TestCase):
         self.assertIs(attached, runtime)
         self.assertIsInstance(brain.vector_db, governance.GovernedVectorStoreProxy)
         self.assertIs(brain.vector_db._vector_store, vector_store)
+
+    def test_governed_retriever_preserves_sync_and_async_calls(self) -> None:
+        calls: list[str] = []
+
+        class VectorStore:
+            def as_retriever(self, **kwargs):
+                return ("raw retriever", kwargs)
+
+        class GovernedRetriever:
+            def invoke(self, query):
+                calls.append(query)
+                return [f"document for {query}"]
+
+        governed = GovernedRetriever()
+        runtime = SimpleNamespace(
+            collection="quivr-demo",
+            governor=SimpleNamespace(
+                wrap=lambda retriever, collection: governed
+            ),
+        )
+        proxy = governance.GovernedVectorStoreProxy(VectorStore(), runtime)
+        retriever = proxy.as_retriever(search_kwargs={"k": 2})
+
+        self.assertEqual(retriever.invoke("sync query"), ["document for sync query"])
+        self.assertEqual(
+            asyncio.run(retriever.ainvoke("async query")),
+            ["document for async query"],
+        )
+        self.assertEqual(calls, ["sync query", "async query"])
+
+    def test_dry_run_reports_runtime_content_scanning_without_false_deny(self) -> None:
+        policy = SimpleNamespace(
+            content_policies=["block_pii"],
+            is_collection_allowed=lambda collection: (True, None),
+        )
+        runtime = SimpleNamespace(policy=policy, collection="quivr-demo")
+        with patch("governance.get_runtime", return_value=runtime):
+            result = governance.evaluate_governance("quivr-demo", "normal query")
+
+        self.assertEqual(result["decision"], "allow")
+        self.assertEqual(result["content_scan"], "runtime_only")
+        self.assertTrue(result["warnings"])
 
 
 if __name__ == "__main__":
