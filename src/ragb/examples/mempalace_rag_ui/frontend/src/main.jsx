@@ -41,6 +41,22 @@ const CUSTOM_MODEL = "__custom__";
 const ACCEPTED_FILES = ".pdf,.docx,.xlsx,.html,.htm,.csv,.txt,.md,.markdown,.mdx";
 const MarkdownAnswer = lazy(() => import("./MarkdownAnswer.jsx"));
 
+function normalizeMessages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const messages = [];
+  raw.forEach((item) => {
+    if (item && typeof item === "object" && !Array.isArray(item) && item.role && item.content) {
+      messages.push({ role: item.role, content: String(item.content) });
+      return;
+    }
+    if (Array.isArray(item) && item.length) {
+      if (item[0]) messages.push({ role: "user", content: String(item[0]) });
+      if (item[1]) messages.push({ role: "assistant", content: String(item[1]) });
+    }
+  });
+  return messages;
+}
+
 async function apiRequest(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
@@ -62,12 +78,17 @@ function App() {
   const [customModel, setCustomModel] = useState("");
   const [brainName, setBrainName] = useState("mempalace-quivr");
   const [wing, setWing] = useState("quivr-demo");
-  const [palacePath, setPalacePath] = useState("~/.mempalace/palace");
   const [memoryCount, setMemoryCount] = useState(5);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.42);
   const [files, setFiles] = useState([]);
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState("");
   const [memoryContext, setMemoryContext] = useState("");
+  const [memoryMatches, setMemoryMatches] = useState([]);
+  const [sources, setSources] = useState([]);
+  const [policyInfo, setPolicyInfo] = useState(null);
+  const [activeModel, setActiveModel] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [indexStatus, setIndexStatus] = useState("No documents indexed yet.");
   const [status, setStatus] = useState({ tone: "neutral", text: "Ready when you are." });
   const [isIndexing, setIsIndexing] = useState(false);
@@ -96,6 +117,25 @@ function App() {
           setStatus({ tone: "error", text: "Model catalog is unavailable." });
         }
       });
+    apiRequest("/api/workspace")
+      .then((payload) => {
+        if (!active) return;
+        setMessages(normalizeMessages(payload.messages));
+        setIndexStatus(payload.index_status || "No documents indexed yet.");
+        setActiveModel(payload.model_name || "");
+        if (payload.provider) setProvider(payload.provider);
+        if (payload.model_name) setModel(payload.model_name);
+        if (typeof payload.similarity_threshold === "number") {
+          setSimilarityThreshold(payload.similarity_threshold);
+        }
+        if (payload.brain_loaded) {
+          setStatus({
+            tone: "success",
+            text: "Workspace restored after refresh. Index and memory are still on the server.",
+          });
+        }
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -152,6 +192,7 @@ function App() {
     try {
       const payload = await apiRequest("/api/index", { method: "POST", body });
       setIndexStatus(payload.message || "Documents indexed.");
+      setActiveModel(payload.model_name || selectedModel);
       setStatus({ tone: "success", text: `${payload.chunks || "Your"} chunks are ready for questions.` });
     } catch (error) {
       setIndexStatus(`Indexing error: ${error.message}`);
@@ -164,24 +205,39 @@ function App() {
   async function handleAsk(event) {
     event?.preventDefault();
     if (!question.trim()) return;
+    const asked = question.trim();
     setIsAsking(true);
-    setStatus({ tone: "working", text: "Searching documents and recalling memory…" });
+    setStatus({ tone: "working", text: `Searching documents with ${selectedModel || "the selected model"}…` });
+    setMessages((current) => [...current, { role: "user", content: asked }]);
     try {
       const payload = await apiRequest("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question,
+          question: asked,
           history: messages,
-          wing,
-          palace_path: palacePath,
+          provider,
+          model_name: selectedModel,
           n_results: memoryCount,
+          similarity_threshold: similarityThreshold,
         }),
       });
-      setMessages(payload.history || messages);
+      const restored = normalizeMessages(payload.history);
+      if (restored.length) {
+        setMessages(restored);
+      } else if (payload.answer) {
+        setMessages((current) => [...current, { role: "assistant", content: payload.answer }]);
+      }
       setMemoryContext(payload.context || "");
+      setMemoryMatches(payload.matches || []);
+      setSources(payload.sources || []);
+      setPolicyInfo(payload.policy || null);
+      setActiveModel(payload.model?.id || selectedModel);
       setQuestion("");
-      setStatus({ tone: payload.ok ? "success" : "error", text: payload.status || "Complete." });
+      setStatus({
+        tone: payload.ok && payload.answer ? "success" : "error",
+        text: payload.status || (payload.answer ? "Complete." : "The model returned an empty answer."),
+      });
     } catch (error) {
       setStatus({ tone: "error", text: `Request failed: ${error.message}` });
     } finally {
@@ -191,7 +247,7 @@ function App() {
 
   async function handleRecall() {
     if (!question.trim()) {
-      setMemoryContext("Enter a question to search MemPalace memory.");
+      setMemoryContext("Enter a question to search conversation memory.");
       return;
     }
     setIsRecalling(true);
@@ -199,9 +255,15 @@ function App() {
       const payload = await apiRequest("/api/recall", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, wing, palace_path: palacePath, n_results: memoryCount }),
+        body: JSON.stringify({
+          question,
+          n_results: memoryCount,
+          similarity_threshold: similarityThreshold,
+        }),
       });
       setMemoryContext(payload.context || "No memories found.");
+      setMemoryMatches(payload.matches || []);
+      setPolicyInfo(payload.policy || null);
       setStatus({ tone: payload.ok ? "success" : "error", text: "Memory recall complete." });
     } catch (error) {
       setStatus({ tone: "error", text: `Memory recall failed: ${error.message}` });
@@ -213,8 +275,49 @@ function App() {
   function clearConversation() {
     setMessages([]);
     setMemoryContext("");
+    setMemoryMatches([]);
+    setSources([]);
     setQuestion("");
-    setStatus({ tone: "neutral", text: "Conversation cleared." });
+    setStatus({ tone: "neutral", text: "Conversation view cleared. Server memory is unchanged until you clear memory." });
+  }
+
+  async function clearIndex() {
+    try {
+      const payload = await apiRequest("/api/index/clear", { method: "POST" });
+      setIndexStatus(payload.message || "Index cleared.");
+      setSources([]);
+      setStatus({ tone: "success", text: "Document vectors were removed. Memory is still available." });
+    } catch (error) {
+      setStatus({ tone: "error", text: error.message });
+    }
+  }
+
+  async function clearMemory() {
+    try {
+      const payload = await apiRequest("/api/memory/clear", { method: "POST" });
+      setMessages([]);
+      setMemoryContext("");
+      setMemoryMatches([]);
+      setStatus({ tone: "success", text: payload.message || "Memory cleared." });
+    } catch (error) {
+      setStatus({ tone: "error", text: error.message });
+    }
+  }
+
+  async function resetWorkspace() {
+    try {
+      const payload = await apiRequest("/api/workspace/reset", { method: "POST" });
+      setMessages([]);
+      setMemoryContext("");
+      setMemoryMatches([]);
+      setSources([]);
+      setFiles([]);
+      setIndexStatus("No documents indexed yet.");
+      setActiveModel("");
+      setStatus({ tone: "success", text: payload.message || "Workspace reset." });
+    } catch (error) {
+      setStatus({ tone: "error", text: error.message });
+    }
   }
 
   if (view === "observability") {
@@ -238,8 +341,8 @@ function App() {
         <div className="topbar-actions">
           <button className="admin-nav-button" type="button" onClick={openObservability}><ShieldCheck size={15} /> Admin observability</button>
           <div className="live-pill"><span className="live-dot" /> Local workspace</div>
-          <button className="icon-button" type="button" aria-label="Help"><CircleHelp size={18} /></button>
-          <button className="avatar" type="button" aria-label="Profile">GS</button>
+          <button className="icon-button" type="button" aria-label="Help" onClick={() => setHelpOpen(true)}><CircleHelp size={18} /></button>
+          <button className="avatar" type="button" aria-label="Single-user workspace">1</button>
         </div>
       </header>
 
@@ -274,7 +377,7 @@ function App() {
         <section className="stats-grid" aria-label="Workspace overview">
           <StatCard icon={<LibraryBig size={18} />} label="Memory layer" value="MemPalace" detail="Persistent recall" accent="violet" />
           <StatCard icon={<Network size={18} />} label="Retrieval layer" value="Quivr RAG" detail="Semantic search" accent="cyan" />
-          <StatCard icon={<Zap size={18} />} label="Active model" value={provider || "Loading"} detail={selectedModel || "Fetching model catalog…"} accent="amber" />
+          <StatCard icon={<Zap size={18} />} label="Active model" value={activeModel || selectedModel || "Loading"} detail={provider || "Fetching model catalog…"} accent="amber" />
           <StatCard icon={<Gauge size={18} />} label="Workspace state" value={files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "Empty"} detail={indexStatus} accent="green" />
         </section>
 
@@ -310,6 +413,7 @@ function App() {
               </div>
               {model === CUSTOM_MODEL && <input id="custom-model" className="custom-model-input" placeholder="Enter your deployment/model ID" value={customModel} onChange={(event) => setCustomModel(event.target.value)} />}
               {provider === "Microsoft Foundry" && <div className="field-hint">Use the deployment name configured in Microsoft Foundry.</div>}
+              {activeModel && activeModel !== selectedModel && <div className="field-hint">Last answer used {activeModel}. The next question will use {selectedModel}.</div>}
             </div>
             <div className="form-section">
               <label htmlFor="brain-name">Brain name</label>
@@ -325,16 +429,22 @@ function App() {
               </div>
             </div>
             <div className="form-section">
-              <label htmlFor="wing">MemPalace wing</label>
+              <label htmlFor="wing">Memory collection</label>
               <input id="wing" value={wing} onChange={(event) => setWing(event.target.value)} />
-            </div>
-            <div className="form-section">
-              <label htmlFor="palace-path">Palace path</label>
-              <input id="palace-path" value={palacePath} onChange={(event) => setPalacePath(event.target.value)} />
             </div>
             <div className="form-section range-section">
               <div className="range-label"><label htmlFor="memory-count">Memories to recall</label><span>{memoryCount}</span></div>
               <input id="memory-count" type="range" min="1" max="10" value={memoryCount} onChange={(event) => setMemoryCount(Number(event.target.value))} />
+            </div>
+            <div className="form-section range-section">
+              <div className="range-label"><label htmlFor="similarity-threshold">Recall similarity threshold</label><span>{similarityThreshold.toFixed(2)}</span></div>
+              <input id="similarity-threshold" type="range" min="0" max="1" step="0.01" value={similarityThreshold} onChange={(event) => setSimilarityThreshold(Number(event.target.value))} />
+              <div className="field-hint">Memories below this cosine score are dropped unless regex overlap is strong.</div>
+            </div>
+            <div className="workspace-actions">
+              <button className="secondary-button small" type="button" onClick={clearIndex}>Clear index</button>
+              <button className="secondary-button small" type="button" onClick={clearMemory}>Clear memory</button>
+              <button className="secondary-button small" type="button" onClick={resetWorkspace}>Reset workspace</button>
             </div>
           </aside>
 
@@ -396,26 +506,62 @@ function App() {
                   </div>
                 ) : (
                   <div className="message-list">
-                    {messages.map(([prompt, answer], index) => <Message key={`${prompt}-${index}`} prompt={prompt} answer={answer} />)}
+                    {messages.map((item, index) => (
+                      item.role === "user"
+                        ? <UserMessage key={`user-${index}`} prompt={item.content} />
+                        : <Message key={`assistant-${index}`} prompt="" answer={item.content} sources={item.role === "assistant" && index === messages.length - 1 ? sources : []} />
+                    ))}
                   </div>
                 )}
               </div>
               <form className="question-composer" onSubmit={handleAsk}>
                 <div className="composer-label"><Search size={14} /> Ask about your sources</div>
-                <textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What would you like to understand?" rows="2" />
+                <textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleAsk(event);
+                    }
+                  }}
+                  placeholder="What would you like to understand?"
+                  rows="2"
+                />
                 <div className="composer-footer"><span>Press Enter to send · Shift + Enter for a new line</span><div className="composer-actions"><button className="secondary-button small" type="button" onClick={handleRecall} disabled={isRecalling}>{isRecalling ? <LoaderCircle className="spin" size={15} /> : <Archive size={15} />} Recall memory</button><motion.button className="primary-button send-button" type="submit" disabled={isAsking || !question.trim()} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>{isAsking ? <LoaderCircle className="spin" size={17} /> : <ArrowUp size={17} />} {isAsking ? "Thinking…" : "Ask"}</motion.button></div></div>
               </form>
             </div>
 
             <div className="memory-panel panel">
-              <div className="panel-heading compact"><div><div className="section-kicker"><Archive size={14} /> Retrieval trace</div><h3>MemPalace context</h3></div><div className="context-badge">{memoryContext ? "Context found" : "Waiting for recall"}</div></div>
-              <div className={`context-box ${memoryContext ? "has-context" : ""}`}>{memoryContext || "Memory retrieved for your next question will appear here."}</div>
+              <div className="panel-heading compact"><div><div className="section-kicker"><Archive size={14} /> Retrieval trace</div><h3>Memory matches</h3></div><div className="context-badge">{memoryMatches.length ? `${memoryMatches.length} kept` : "Waiting for recall"}</div></div>
+              {policyInfo && <div className="policy-strip">Budget {policyInfo.budget?.memory_budget || "—"} tokens · used {policyInfo.token_usage?.memory || 0}{policyInfo.summarized ? " · older turns summarized" : ""}</div>}
+              {memoryMatches.length > 0 && (
+                <div className="match-list">
+                  {memoryMatches.map((match) => (
+                    <div className="match-card" key={match.id}>
+                      <div className="match-meta"><strong>{match.matched_field}</strong><span>score {match.score}</span></div>
+                      <div className="match-explain">{match.explanation}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className={`context-box ${memoryContext ? "has-context" : ""}`}>{memoryContext || "Memory retrieved for your next question will appear here. Refresh keeps this store; use Clear memory to wipe it."}</div>
             </div>
           </section>
         </div>
       </main>
 
-      <footer className="footer"><span>Built for thoughtful retrieval</span><span className="footer-divider" /><span>Quivr RAG <b>·</b> MemPalace memory</span></footer>
+      <footer className="footer"><span>Built for thoughtful retrieval</span><span className="footer-divider" /><span>Quivr RAG <b>·</b> DuckDB memory</span></footer>
+      {helpOpen && (
+        <div className="help-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="help-card" onClick={(event) => event.stopPropagation()}>
+            <h3>Single-user workspace</h3>
+            <p>Refresh restores the index and conversation from DuckDB. Use <b>Clear index</b> to drop vectors, <b>Clear memory</b> to drop Q&A turns, or <b>Reset workspace</b> for both.</p>
+            <p>Changing the model applies on the next question without re-indexing. Memory is packed to that model's context window and summarized when it would overflow.</p>
+            <button className="primary-button" type="button" onClick={() => setHelpOpen(false)}>Got it</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -631,7 +777,19 @@ function formatDate(value) {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function Message({ prompt, answer }) {
+function UserMessage({ prompt }) {
+  return (
+    <div className="user-message">
+      <div className="message-avatar user">You</div>
+      <div>
+        <div className="message-role">Question</div>
+        <div className="message-text">{prompt}</div>
+      </div>
+    </div>
+  );
+}
+
+function Message({ prompt, answer, sources = [] }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [audioError, setAudioError] = useState("");
@@ -740,13 +898,15 @@ function Message({ prompt, answer }) {
 
   return (
     <motion.div className="message-pair" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="user-message">
-        <div className="message-avatar user">You</div>
-        <div>
-          <div className="message-role">Question</div>
-          <div className="message-text">{prompt}</div>
+      {prompt ? (
+        <div className="user-message">
+          <div className="message-avatar user">You</div>
+          <div>
+            <div className="message-role">Question</div>
+            <div className="message-text">{prompt}</div>
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="assistant-message">
         <div className="message-avatar assistant"><Sparkles size={14} /></div>
         <div className="message-content-wrapper">
@@ -764,9 +924,19 @@ function Message({ prompt, answer }) {
           </div>
           <div className="message-text answer-text markdown-content" aria-label="Assistant answer">
             <Suspense fallback={<div className="markdown-loading">Formatting answer…</div>}>
-              <MarkdownAnswer answer={answer} />
+              {answer ? <MarkdownAnswer answer={answer} /> : <p>The model did not return visible text.</p>}
             </Suspense>
           </div>
+          {sources?.length > 0 && (
+            <div className="source-list">
+              {sources.map((source, index) => (
+                <div className="source-chip" key={`${source.filename}-${index}`}>
+                  <strong>{source.filename || "chunk"}</strong>
+                  <span>{source.snippet}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {audioError && <div className="audio-error" role="status">{audioError}</div>}
         </div>
       </div>

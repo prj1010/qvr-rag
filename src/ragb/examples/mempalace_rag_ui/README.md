@@ -76,7 +76,13 @@ publish_package.cmd
    files locally; MarkItDown covers CSV, text, Markdown, and parser fallback
    cases. A Megaparse/NATS server or Tesseract installation is not required.
 4. Click **Recall memories** to test MemPalace alone.
-5. Click **Ask** to run Quivr document RAG plus MemPalace memory context.
+5. Click **Ask** to run Quivr document RAG plus DuckDB memory context.
+
+Refresh keeps the backend. The browser reloads the last conversation and index
+from DuckDB + SQLite. Use **Clear index** to drop vectors, **Clear memory** to
+drop Q&A turns, or **Reset workspace** for both. Changing the model applies on
+the next question without re-indexing. Recalled memories are scored with regex
+plus cosine similarity, and packed into the selected model's context window.
 
 The response prompt is application-owned and keeps the model grounded in the
 indexed documents. Retrieved memories and document text are explicitly marked
@@ -118,8 +124,8 @@ and does not install CUDA. MarkItDown remains the parser for CSV, text, and
 Markdown files and provides fallback coverage for PDF/DOCX. The optional
 DocStrange cloud route is disabled by default; enable it explicitly with
 `DOCSTRANGE_FALLBACK_ENABLED=true` if a provider fallback is needed.
-Vectors are stored in a temporary SQLite database through `sqlite-vec`, avoiding
-the extra in-process FAISS index. Use a persistent pgvector or managed vector
-service for production durability.
+Vectors are stored in a persistent SQLite database through `sqlite-vec` (see
+`VECTOR_DB_PATH`). Conversation memory lives in DuckDB (`WORKSPACE_DB_PATH`).
+Refresh restores both; only the explicit clear/reset actions wipe them.
 Hugging Face support remains available in the standalone integration package
 through its optional `huggingface` extra.
