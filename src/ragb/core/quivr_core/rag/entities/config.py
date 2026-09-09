@@ -17,8 +17,8 @@ from quivr_core.llm_tools.llm_tools import TOOLS_CATEGORIES, TOOLS_LISTS, LLMToo
 from quivr_core.processor.splitter import SplitterConfig
 
 logger = logging.getLogger("quivr_core")
-MIN_CONTEXT_TOKENS = 4096
-MIN_OUTPUT_TOKENS = 4096
+MIN_CONTEXT_TOKENS = 1024
+MIN_OUTPUT_TOKENS = 256
 
 
 def normalize_to_env_variable_name(name: str) -> str:

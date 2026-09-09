@@ -83,6 +83,31 @@ class SQLiteVecStoreTests(unittest.TestCase):
             store.cleanup()
         self.assertFalse(path.exists())
 
+    def test_reopen_hydrates_embedding_dimension(self) -> None:
+        path = Path.cwd() / "test-vectors-hydrate.sqlite3"
+        for suffix in ("", "-wal", "-shm"):
+            path.with_name(path.name + suffix).unlink(missing_ok=True)
+        self.addCleanup(
+            lambda: [
+                path.with_name(path.name + suffix).unlink(missing_ok=True)
+                for suffix in ("", "-wal", "-shm")
+            ]
+        )
+        store = SQLiteVecStore(path, DeterministicEmbeddings())
+        store.add_texts(
+            ["Python deployment", "SQLite vector storage"],
+            [{"source": "python"}, {"source": "sqlite"}],
+            ids=["python-doc", "sqlite-doc"],
+        )
+        store.close()
+        reopened = SQLiteVecStore(path, DeterministicEmbeddings())
+        self.addCleanup(reopened.close)
+        self.assertEqual(reopened._dimension, 3)
+        results = reopened.similarity_search("SQLite", k=1)
+        self.assertEqual(results[0].id, "sqlite-doc")
+        reopened.cleanup()
+        self.assertFalse(path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

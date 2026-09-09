@@ -103,6 +103,41 @@ class SQLiteVecStore(VectorStore):
             )
         self._dimension: int | None = None
         self._closed = False
+        self._hydrate_dimension()
+
+    def _hydrate_dimension(self) -> None:
+        """Recover the stored embedding width after a process restart."""
+
+        try:
+            row = self._db.execute(
+                """
+                SELECT sql FROM sqlite_master
+                WHERE type='table' AND name IN ('vectors', 'vectors_fallback')
+                """
+            ).fetchone()
+        except sqlite3.Error:
+            return
+        if row and row[0] and "float[" in row[0]:
+            start = row[0].index("float[") + len("float[")
+            end = row[0].index("]", start)
+            try:
+                self._dimension = int(row[0][start:end])
+                self._use_sqlite_vec = True
+                self._vector_table = "vectors"
+            except ValueError:
+                return
+            return
+        try:
+            blob_row = self._db.execute(
+                "SELECT embedding FROM vectors_fallback LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            return
+        if blob_row and blob_row[0]:
+            self._dimension = len(blob_row[0]) // struct.calcsize("f")
+            self._use_sqlite_vec = False
+            self._vector_table = "vectors_fallback"
+
 
     @property
     def embeddings(self) -> Embeddings:
@@ -315,7 +350,7 @@ class SQLiteVecStore(VectorStore):
         fetch_k: int | None = None,
         **kwargs: Any,
     ) -> list[tuple[Document, float]]:
-        del filter, kwargs
+        del kwargs
         if k < 1:
             return []
         query_vector = self.embedding.embed_query(query)
@@ -371,6 +406,15 @@ class SQLiteVecStore(VectorStore):
                         float(distance),
                     )
                 )
+            if isinstance(filter, dict) and filter:
+                results = [
+                    (document, distance)
+                    for document, distance in results
+                    if all(
+                        str(document.metadata.get(key)) == str(value)
+                        for key, value in filter.items()
+                    )
+                ]
             return results
 
     def similarity_search(

@@ -27,6 +27,18 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertIs(response["providers"], MODEL_CATALOG)
         self.assertNotIn("api_key", str(response).lower())
 
+    def test_every_model_declares_a_context_window(self) -> None:
+        from model_catalog import context_window_for, max_output_tokens_for
+
+        for provider in MODEL_CATALOG.values():
+            for model in provider["models"]:
+                self.assertGreater(model["context_window"], 0, model["id"])
+                self.assertGreater(model["max_output_tokens"], 0, model["id"])
+                self.assertEqual(context_window_for(model["id"]), model["context_window"])
+                self.assertEqual(
+                    max_output_tokens_for(model["id"]), model["max_output_tokens"]
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
