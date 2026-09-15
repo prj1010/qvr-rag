@@ -13,6 +13,7 @@ import {
   CircleHelp,
   Clock3,
   ExternalLink,
+  FileCheck2,
   FileText,
   FolderOpen,
   Gauge,
@@ -432,6 +433,8 @@ function AdminConsole({ onBack }) {
   const [governanceInput, setGovernanceInput] = useState({ collection: "quivr-demo", text: "" });
   const [governanceResult, setGovernanceResult] = useState(null);
   const [isEvaluatingGovernance, setIsEvaluatingGovernance] = useState(false);
+  const [aicertifyResult, setAicertifyResult] = useState(null);
+  const [isEvaluatingAICertify, setIsEvaluatingAICertify] = useState(false);
 
   async function loadDashboard() {
     setIsRefreshing(true);
@@ -469,6 +472,26 @@ function AdminConsole({ onBack }) {
     }
   }
 
+  async function evaluateAICertify() {
+    setIsEvaluatingAICertify(true);
+    try {
+      const result = await apiRequest("/api/admin/aicertify/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          policy: dashboard?.aicertify?.policy || "eu_ai_act",
+          report_format: dashboard?.aicertify?.report_format || "markdown",
+        }),
+      });
+      setAicertifyResult(result);
+      await loadDashboard();
+    } catch (requestError) {
+      setAicertifyResult({ ok: false, error: requestError.message });
+    } finally {
+      setIsEvaluatingAICertify(false);
+    }
+  }
+
   useEffect(() => {
     loadDashboard();
     const interval = window.setInterval(loadDashboard, 10000);
@@ -482,6 +505,7 @@ function AdminConsole({ onBack }) {
   const governance = dashboard?.governance || {};
   const governancePolicy = governance.policy || {};
   const auditEvents = governance.audit_events || [];
+  const aicertify = dashboard?.aicertify || {};
 
   return (
     <div className="app-shell admin-shell">
@@ -567,6 +591,33 @@ function AdminConsole({ onBack }) {
           <div className="operation-grid">
             {Object.entries(summary.operations || {}).map(([name, count]) => <div className="operation-card" key={name}><span>{name}</span><strong>{count}</strong></div>)}
             {Object.keys(summary.operations || {}).length === 0 && <div className="operation-card muted-operation">Operations appear after the first request.</div>}
+          </div>
+        </section>
+
+        <section className="panel governance-panel">
+          <div className="panel-heading compact">
+            <div><div className="section-kicker"><FileCheck2 size={14} /> AICertify evidence</div><h3>Generate a compliance report from captured RAG interactions</h3></div>
+            <div className={`governance-status ${aicertify.enabled && !aicertify.availability_error ? "active" : "inactive"}`}><span />{aicertify.availability_error ? "AICertify unavailable" : aicertify.enabled ? "AICertify ready" : "AICertify disabled"}</div>
+          </div>
+          {aicertify.availability_error && <div className="status-banner error">{aicertify.availability_error}</div>}
+          <div className="governance-summary">
+            <div className="governance-card"><span>Captured interactions</span><strong>{aicertify.captured_interactions ?? 0}</strong></div>
+            <div className="governance-card"><span>Policy</span><strong>{aicertify.policy || "eu_ai_act"}</strong></div>
+            <div className="governance-card"><span>Report format</span><strong>{aicertify.report_format || "markdown"}</strong></div>
+            <div className="governance-card"><span>SDK</span><strong>{aicertify.package_version || "not installed"}</strong></div>
+          </div>
+          <div className="governance-lower-grid">
+            <div className="governance-evaluator">
+              <div className="governance-label">Evidence capture</div>
+              <p>Capture is opt-in and bounded to the current process. Set <code>AICERTIFY_CAPTURE_INTERACTIONS=true</code>, then ask questions before generating a report.</p>
+              {aicertify.last_evaluation && <div className={`governance-result ${aicertify.last_evaluation.ok ? "allow" : "error"}`}><strong>{aicertify.last_evaluation.ok ? "Report generated" : "Evaluation unavailable"}</strong><span>{aicertify.last_evaluation.error || `${aicertify.last_evaluation.interaction_count || 0} interaction(s) evaluated.`}</span></div>}
+            </div>
+            <div className="governance-evaluator">
+              <div className="governance-label">Run policy evaluation</div>
+              <p>Uses the real AICertify SDK and writes the selected report to the configured report directory.</p>
+              <button className="secondary-button" type="button" onClick={evaluateAICertify} disabled={isEvaluatingAICertify || !aicertify.captured_interactions}>{isEvaluatingAICertify ? <LoaderCircle className="spin" size={15} /> : <FileCheck2 size={15} />} {isEvaluatingAICertify ? "Evaluating…" : "Generate report"}</button>
+              {aicertifyResult && <div className={`governance-result ${aicertifyResult.ok ? "allow" : "error"}`}><strong>{aicertifyResult.ok ? "Complete" : "Could not evaluate"}</strong><span>{aicertifyResult.error || `Evaluated ${aicertifyResult.interaction_count || 0} interaction(s).`}</span></div>}
+            </div>
           </div>
         </section>
 

@@ -28,6 +28,12 @@ from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 from admin_auth import ADMIN_AUTH
+from aicertify_integration import (
+    aicertify_snapshot,
+    clear_interactions,
+    evaluate_aicertify,
+    record_interaction,
+)
 from governance import apply_governance, evaluate_governance, governance_snapshot
 from model_catalog import MODEL_CATALOG, model_catalog_response
 from ocr import (
@@ -664,6 +670,11 @@ def answer_question(
             {"question_chars": len(question)},
         ):
             answer = assistant.ask(question)
+        record_interaction(
+            question,
+            answer,
+            {"wing": wing.strip(), "memory_results": int(n_results)},
+        )
         return (
             [*history, [question, answer]],
             "",
@@ -697,6 +708,11 @@ class RecallRequest(BaseModel):
 class GovernanceEvaluateRequest(BaseModel):
     collection: str = Field(default="", max_length=200)
     text: str = Field(default="", max_length=10000)
+
+
+class AICertifyEvaluateRequest(BaseModel):
+    policy: str = Field(default="eu_ai_act", min_length=1, max_length=200)
+    report_format: str = Field(default="markdown", min_length=1, max_length=20)
 
 
 app = FastAPI(
@@ -792,6 +808,7 @@ def admin_observability(request: Request) -> dict[str, Any]:
         "admin": identity,
         **OBSERVABILITY.snapshot(),
         "governance": governance_snapshot(),
+        "aicertify": aicertify_snapshot(),
     }
 
 
@@ -811,6 +828,35 @@ def admin_governance_evaluate(
 
     ADMIN_AUTH.require_admin(request)
     return evaluate_governance(payload.collection, payload.text)
+
+
+@app.get("/api/admin/aicertify")
+def admin_aicertify(request: Request) -> dict[str, Any]:
+    """Return AICertify availability, capture settings, and last-run metadata."""
+
+    ADMIN_AUTH.require_admin(request)
+    return aicertify_snapshot()
+
+
+@app.post("/api/admin/aicertify/evaluate")
+def admin_aicertify_evaluate(
+    request: Request, payload: AICertifyEvaluateRequest
+) -> dict[str, Any]:
+    """Generate an AICertify report for captured RAG interactions."""
+
+    ADMIN_AUTH.require_admin(request)
+    return evaluate_aicertify(
+        policy=payload.policy,
+        report_format=payload.report_format,
+    )
+
+
+@app.post("/api/admin/aicertify/clear")
+def admin_aicertify_clear(request: Request) -> dict[str, Any]:
+    """Clear the bounded in-memory AICertify evidence window."""
+
+    ADMIN_AUTH.require_admin(request)
+    return {"cleared": clear_interactions()}
 
 
 @app.get("/api/health")

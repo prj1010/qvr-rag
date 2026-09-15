@@ -1,0 +1,3 @@
+# AICertify runs in a dedicated environment because the current Quivr app uses
+# LangChain 0.3 while AICertify 0.8.x uses LangChain 1.x.
+aicertify==0.8.1

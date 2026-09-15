@@ -379,6 +379,26 @@ native Render service can use the toolkit's policy and audit features, but
 Docker/OS sandbox features need a separate container-capable worker; they are
 not available inside a native Render Python service.
 
+## AICertify compliance evidence
+
+The admin console can turn captured RAG question/answer interactions into an
+audit report using the real [AICertify SDK](https://github.com/Principled-Evolution/aicertify).
+Capture is opt-in and held only in a bounded process-local buffer. The report
+is generated only when an administrator clicks **Generate report**.
+
+Current AICertify releases require LangChain 1.x, while this application’s
+Quivr runtime is pinned to LangChain 0.3. Install AICertify in its dedicated
+environment so the two dependency graphs do not overwrite one another:
+
+```bat
+src\ragb\examples\mempalace_rag_ui\setup_aicertify.cmd
+```
+
+Then set the generated `AICERTIFY_PYTHON` path and
+`AICERTIFY_CAPTURE_INTERACTIONS=true` in the UI `.env`. Choose the policy with
+`AICERTIFY_POLICY` (default `eu_ai_act`) and inspect the generated Markdown,
+JSON, HTML, or PDF report under `AICERTIFY_REPORT_DIR`.
+
 ## Security
 
 Do not commit:
