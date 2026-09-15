@@ -652,6 +652,11 @@ function AdminConsole({ onBack }) {
   const governancePolicy = governance.policy || {};
   const auditEvents = governance.audit_events || [];
   const aicertify = dashboard?.aicertify || {};
+  const sharding = dashboard?.sharding || {};
+  const shardRegistry = sharding.registry || {};
+  const shards = shardRegistry.shards || [];
+  const shardRetrieval = sharding.last_retrieval || {};
+  const shardActions = sharding.lifecycle_recommendations || [];
 
   return (
     <div className="app-shell admin-shell">
@@ -737,6 +742,32 @@ function AdminConsole({ onBack }) {
           <div className="operation-grid">
             {Object.entries(summary.operations || {}).map(([name, count]) => <div className="operation-card" key={name}><span>{name}</span><strong>{count}</strong></div>)}
             {Object.keys(summary.operations || {}).length === 0 && <div className="operation-card muted-operation">Operations appear after the first request.</div>}
+          </div>
+        </section>
+
+        <section className="panel governance-panel">
+          <div className="panel-heading compact">
+            <div><div className="section-kicker"><Layers3 size={14} /> Shard router</div><h3>ACL-first parallel document retrieval</h3></div>
+            <div className={`governance-status ${sharding.enabled ? "active" : "inactive"}`}><span />{sharding.enabled ? "Sharding enabled" : "Single index"}</div>
+          </div>
+          <div className="governance-summary">
+            <div className="governance-card"><span>Registered shards</span><strong>{shards.length}</strong></div>
+            <div className="governance-card"><span>Partition keys</span><strong>{sharding.dimensions?.join(", ") || "none"}</strong></div>
+            <div className="governance-card"><span>Last fan-out</span><strong>{shardRetrieval.attempted_shards?.length ?? 0} shard(s)</strong></div>
+            <div className="governance-card"><span>Retrieval latency</span><strong>{formatDuration(shardRetrieval.latency_ms)}</strong></div>
+          </div>
+          <div className="governance-lower-grid">
+            <div>
+              <div className="governance-label">Registry and health</div>
+              {shards.length ? <div className="audit-list">{shards.map((shard) => <div className="audit-row" key={shard.shard_id}><span className={`audit-decision ${shard.status === "healthy" ? "allow" : "deny"}`}>{shard.status}</span><span className="audit-main"><strong>{shard.shard_id}</strong><small>{shard.tenant || "default tenant"} · {shard.chunk_count || 0} chunks · index v{shard.index_version || "1"}</small></span></div>)}</div> : <div className="admin-empty compact"><Layers3 size={22} /><p>Index documents to populate the shard registry.</p></div>}
+            </div>
+            <div className="governance-evaluator">
+              <div className="governance-label">Progressive retrieval</div>
+              <p>{shardRetrieval.expanded ? "Fan-out expanded because initial evidence was insufficient." : "The highest-ranked authorized shards satisfied the current evidence thresholds."}</p>
+              <div className="governance-rules"><span><b>Authorized:</b> {shardRetrieval.authorized_shards ?? 0}</span><span><b>Results:</b> {shardRetrieval.result_count ?? 0}</span><span><b>Failures:</b> {Object.keys(shardRetrieval.failures || {}).length}</span></div>
+              <div className="governance-label audit-label">Lifecycle recommendations</div>
+              {shardActions.length ? <div className="capability-list">{shardActions.map((action, index) => <span className="capability-chip" key={`${action.action}-${index}`}><Layers3 size={12} /> {action.action}: {(action.shard_ids || [action.shard_id]).join(", ")}</span>)}</div> : <p>No split or merge action is currently recommended.</p>}
+            </div>
           </div>
         </section>
 

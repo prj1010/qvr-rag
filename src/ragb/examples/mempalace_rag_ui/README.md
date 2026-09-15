@@ -129,3 +129,27 @@ Vectors are stored in a persistent SQLite database through `sqlite-vec` (see
 Refresh restores both; only the explicit clear/reset actions wipe them.
 Hugging Face support remains available in the standalone integration package
 through its optional `huggingface` extra.
+
+## Optional shard routing
+
+Document retrieval can be partitioned without changing Quivr, ingestion, the
+LLM, or DuckDB conversation memory. By default the app keeps one SQLite shard.
+To enable meaningful partitions, set `RAG_SHARDING_ENABLED=true` and configure
+`RAG_SHARD_DIMENSIONS=tenant,domain,project,time` (or a smaller subset suited to
+your corpus). Documents carrying those metadata keys are written to independent
+SQLite indexes; small datasets can remain unsharded.
+
+For every query, the server applies its tenant/security scope and
+`RAG_ALLOWED_SHARDS` before metadata, keyword/entity, semantic-profile,
+freshness, and load scoring. It searches a small ranked set in parallel,
+normalizes and fuses scores globally, deduplicates results, and expands fan-out
+when the evidence is weak. Failed shards are marked degraded and do not prevent
+authorized healthy shards from answering. The admin-only
+`/api/admin/sharding` endpoint exposes registry state, health, routing cache
+use, fan-out, failures, lifecycle split/merge recommendations, and retrieval
+evidence. Operators can transition a shard through its lifecycle with
+`POST /api/admin/sharding/status`; actual data-moving split/merge jobs remain
+separate so they can validate ACL boundaries, provenance, document mappings,
+and index compatibility before marking replacement shards healthy. Request `domain`, `project`,
+time range, and `shard_filters` are optional narrowing hints; they never expand
+the deployment-controlled authorization scope.

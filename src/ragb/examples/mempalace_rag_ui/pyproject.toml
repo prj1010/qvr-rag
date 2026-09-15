@@ -62,6 +62,8 @@ py-modules = [
     "memory_store",
     "memory_search",
     "context_policy",
+    "sharding",
+    "sharded_vector_store",
 ]
 include-package-data = true
 

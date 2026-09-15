@@ -18,7 +18,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 
 from observability import OBSERVABILITY, content_metadata
 from dotenv import load_dotenv
@@ -57,7 +57,8 @@ from quivr_core.llm import LLMEndpoint
 from quivr_core.rag.entities.chat import ChatHistory
 from quivr_core.rag.entities.config import DefaultModelSuppliers, LLMEndpointConfig
 from quivr_core.rag.utils import chunk_visible_text, message_text
-from sqlite_vector_store import SQLiteVecStore
+from sharded_vector_store import ShardedVectorStore
+from sharding import ShardQuery
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -101,6 +102,47 @@ def _underlying_vector_store(brain: Any | None) -> Any:
         return None
     store = getattr(brain, "vector_db", None)
     return getattr(store, "_vector_store", store)
+
+
+def _shard_query_context(
+    brain: Brain | None,
+    *,
+    domain: str = "",
+    project: str = "",
+    time_start: str = "",
+    time_end: str = "",
+    filters: dict[str, str] | None = None,
+) -> Any:
+    """Attach server-controlled ACL scope to a single RAG retrieval request."""
+
+    store = _underlying_vector_store(brain)
+    if not isinstance(store, ShardedVectorStore):
+        return nullcontext()
+    allowed_shards = {
+        item.strip()
+        for item in os.getenv("RAG_ALLOWED_SHARDS", "").split(",")
+        if item.strip()
+    }
+    return store.query_context(
+        ShardQuery.from_values(
+            # Security scope and shard allow-list are deployment-side inputs;
+            # callers may supply narrowing metadata but never a broader ACL.
+            security_scope=os.getenv("RAG_SECURITY_SCOPE", "default"),
+            authorized_shards=allowed_shards or None,
+            tenant=os.getenv("RAG_TENANT_ID", "default"),
+            domain=domain,
+            project=project,
+            time_start=time_start,
+            time_end=time_end,
+            filters=filters or {},
+        )
+    )
+
+
+def _sharding_snapshot() -> dict[str, Any]:
+    store = _underlying_vector_store(STATE.brain)
+    snapshot = getattr(store, "snapshot", None)
+    return snapshot() if callable(snapshot) else {"enabled": False, "registry": {"shards": []}}
 
 
 def _persist_workspace_meta() -> None:
@@ -684,14 +726,14 @@ def index_documents(
         embedder = _build_embedder()
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         vector_path = DEFAULT_VECTOR_PATH
-        vector_store: SQLiteVecStore | None = None
+        vector_store: ShardedVectorStore | None = None
         with OBSERVABILITY.span(
             "embeddings.index",
             "embedding",
             {"chunk_count": len(chunks), "provider": provider, "model": model_name},
         ):
             try:
-                vector_store = SQLiteVecStore(vector_path, embedding=embedder)
+                vector_store = ShardedVectorStore(vector_path, embedding=embedder)
                 brain = asyncio.run(
                     Brain.afrom_langchain_documents(
                         name=brain_name.strip() or "mempalace-quivr",
@@ -797,6 +839,7 @@ def answer_question(
     similarity_threshold: float,
     provider: str,
     model_name: str,
+    shard_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     messages = _normalize_history(history) or STORE.list_messages()
     if not question.strip():
@@ -839,16 +882,19 @@ def answer_question(
             STORE.set_summary(packed.summary)
         chat_history = _chat_history_from_messages(brain, messages)
         responder = AsyncQuivrResponder(brain, chat_history=chat_history)
-        with OBSERVABILITY.span(
-            "llm.answer",
-            "generation",
-            {
-                "question_chars": len(question),
-                "provider": selected_provider,
-                "model": selected_model,
-            },
-        ):
-            answer = responder(question, packed.memory_block)
+        with _shard_query_context(brain, **(shard_context or {})):
+            with OBSERVABILITY.span(
+                "llm.answer",
+                "generation",
+                {
+                    "question_chars": len(question),
+                    "provider": selected_provider,
+                    "model": selected_model,
+                },
+            ):
+                answer = responder(question, packed.memory_block)
+            sources = _collect_sources(brain, question)
+            sharding = getattr(_underlying_vector_store(brain), "last_report", None)
         record_interaction(
             question,
             answer,
@@ -865,7 +911,6 @@ def answer_question(
             answer_emb=_embed_query(answer),
         )
         history_out = STORE.list_messages()
-        sources = _collect_sources(brain, question)
         catalog_model = find_model(selected_model) or {}
         return {
             "ok": True,
@@ -874,6 +919,7 @@ def answer_question(
             "context": packed.memory_block,
             "matches": [match.as_dict() for match in matches],
             "sources": sources,
+            "sharding": sharding,
             "policy": packed.as_dict(),
             "model": {
                 "provider": selected_provider,
@@ -928,6 +974,11 @@ class AskRequest(BaseModel):
     provider: str = ""
     model_name: str = ""
     wing: str = "quivr-demo"
+    domain: str = Field(default="", max_length=200)
+    project: str = Field(default="", max_length=200)
+    time_start: str = Field(default="", max_length=40)
+    time_end: str = Field(default="", max_length=40)
+    shard_filters: dict[str, str] = Field(default_factory=dict)
     n_results: int = Field(default=5, ge=1, le=20)
     similarity_threshold: float = Field(default=DEFAULT_SIMILARITY_THRESHOLD, ge=0.0, le=1.0)
 
@@ -949,6 +1000,11 @@ class AICertifyEvaluateRequest(BaseModel):
     report_format: str = Field(default="markdown", min_length=1, max_length=20)
 
 
+class ShardStatusRequest(BaseModel):
+    shard_id: str = Field(min_length=1, max_length=200)
+    status: str = Field(min_length=1, max_length=20)
+
+
 def _restore_brain_from_disk() -> None:
     """Reload the last index after a process or browser refresh (single user)."""
 
@@ -958,7 +1014,7 @@ def _restore_brain_from_disk() -> None:
     STATE.provider = str(meta.get("provider") or "")
     STATE.model_name = str(meta.get("model_name") or "")
     vector_path = Path(str(meta.get("vector_path") or DEFAULT_VECTOR_PATH)).expanduser()
-    if not vector_path.exists() or not STATE.indexed_files:
+    if not ShardedVectorStore.can_restore(vector_path) or not STATE.indexed_files:
         return
     try:
         _load_app_environment()
@@ -966,7 +1022,7 @@ def _restore_brain_from_disk() -> None:
         model_name = STATE.model_name or _default_model(provider)
         llm = _build_llm(provider, model_name)
         embedder = _build_embedder()
-        store = SQLiteVecStore(vector_path, embedding=embedder)
+        store = ShardedVectorStore(vector_path, embedding=embedder)
         brain = Brain(
             name=str(meta.get("brain_name") or "mempalace-quivr"),
             llm=llm,
@@ -1082,6 +1138,7 @@ def admin_observability(request: Request) -> dict[str, Any]:
         **OBSERVABILITY.snapshot(),
         "governance": governance_snapshot(),
         "aicertify": aicertify_snapshot(),
+        "sharding": _sharding_snapshot(),
     }
 
 
@@ -1091,6 +1148,32 @@ def admin_governance(request: Request) -> dict[str, Any]:
 
     ADMIN_AUTH.require_admin(request)
     return governance_snapshot()
+
+
+@app.get("/api/admin/sharding")
+def admin_sharding(request: Request) -> dict[str, Any]:
+    """Return shard registry, lifecycle state, and last retrieval evidence."""
+
+    ADMIN_AUTH.require_admin(request)
+    return _sharding_snapshot()
+
+
+@app.post("/api/admin/sharding/status")
+def admin_sharding_status(
+    request: Request, payload: ShardStatusRequest
+) -> dict[str, Any]:
+    """Transition a shard through healthy/degraded/offline/rebuilding/migrating states."""
+
+    ADMIN_AUTH.require_admin(request)
+    store = _underlying_vector_store(STATE.brain)
+    if not isinstance(store, ShardedVectorStore):
+        raise HTTPException(status_code=409, detail="No active sharded document index.")
+    try:
+        return {"shard": store.set_shard_status(payload.shard_id, payload.status)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown shard.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/admin/governance/evaluate")
@@ -1143,6 +1226,7 @@ def health() -> dict[str, Any]:
         "provider": STATE.provider,
         "model": STATE.model_name,
         "memory_turns": len(STORE.list_memories()),
+        "sharding": _sharding_snapshot(),
     }
 
 
@@ -1345,6 +1429,7 @@ def _answer_with_current_brain(
     similarity_threshold: float,
     provider: str,
     model_name: str,
+    shard_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Snapshot the brain under the lock, then generate without blocking re-index swaps."""
 
@@ -1359,6 +1444,7 @@ def _answer_with_current_brain(
         similarity_threshold,
         provider,
         model_name,
+        shard_context,
     )
     del generation
     return result
@@ -1422,6 +1508,13 @@ async def api_answer_question(request: AskRequest) -> dict[str, Any]:
                 request.similarity_threshold,
                 request.provider,
                 request.model_name,
+                {
+                    "domain": request.domain,
+                    "project": request.project,
+                    "time_start": request.time_start,
+                    "time_end": request.time_end,
+                    "filters": request.shard_filters,
+                },
             )
         return payload
 
