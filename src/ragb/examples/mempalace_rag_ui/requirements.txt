@@ -60,6 +60,10 @@ torchvision>=0.17,<1
 # SQLite-backed vectors replace Quivr's in-process FAISS default.
 sqlite-vec>=0.1.9,<0.2
 
+# --- Single-user workspace memory ---
+# DuckDB stores conversation turns, rolling summaries, and restore state.
+duckdb>=1.1,<2
+
 # --- Observability ---
 logfire[fastapi]>=5.0,<6
 

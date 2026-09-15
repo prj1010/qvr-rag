@@ -18,7 +18,44 @@ from quivr_core.rag.prompts import TemplatePromptName, custom_prompts
 # This should be used for serialization/deseriallization later
 
 
-logger = logging.getLogger("quivr_core")
+def message_text(content: Any) -> str:
+    """Normalize LangChain message content (string, list of blocks, or dict) to text."""
+
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(message_text(item) for item in content)
+    if isinstance(content, dict):
+        for key in ("text", "content", "output_text", "reasoning_content"):
+            value = content.get(key)
+            if value:
+                return message_text(value)
+        return ""
+    return str(content)
+
+
+def chunk_visible_text(chunk: Any) -> str:
+    """Prefer visible answer text over hidden reasoning traces."""
+
+    content = message_text(getattr(chunk, "content", None))
+    if content.strip():
+        return content
+    additional = getattr(chunk, "additional_kwargs", None) or {}
+    if isinstance(additional, dict):
+        for key in ("content", "output_text", "text"):
+            value = additional.get(key)
+            text = message_text(value)
+            if text.strip():
+                return text
+    response_metadata = getattr(chunk, "response_metadata", None) or {}
+    if isinstance(response_metadata, dict):
+        text = message_text(response_metadata.get("output_text"))
+        if text.strip():
+            return text
+    return content
+
 
 
 def model_supports_function_calling(model_name: str):
@@ -98,9 +135,12 @@ def parse_chunk_response(
     tool_calls = rolling_msg.tool_calls
 
     if not supports_func_calling or not tool_calls:
-        new_content = raw_chunk.content  # Just the new chunk's content
-        full_content = rolling_msg.content  # The full accumulated content
-        return rolling_msg, new_content, full_content
+        new_content = chunk_visible_text(raw_chunk)
+        full_content = chunk_visible_text(rolling_msg)
+        if isinstance(new_content, str) and isinstance(full_content, str):
+            return rolling_msg, new_content, full_content
+        return rolling_msg, message_text(new_content), message_text(full_content)
+
 
     current_answers = get_answers_from_tool_calls(tool_calls)
     full_answer = "\n\n".join(current_answers)

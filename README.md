@@ -13,6 +13,9 @@ Microsoft Foundry models and provides a modern animated knowledge workspace.
 - Groq LLM support
 - NVIDIA NIM LLM and embedding support
 - Microsoft Foundry OpenAI v1-compatible Phi/SLM support
+- DuckDB conversation memory for a single-user instance (refresh restores it)
+- Regex + cosine recall with a similarity threshold and per-model context budgets
+- Clear index, clear memory, and reset workspace actions
 - Grounded, injection-resistant RAG system prompt with bounded memory context
 - PDF, DOCX, XLSX, HTML, CSV, TXT, and Markdown files
 - Olga native document parsing with Docling/RapidOCR fallback for scanned PDFs
@@ -29,7 +32,7 @@ React + Vite frontend
 FastAPI application API
         |
         +-- Quivr Core document RAG
-        +-- MemPalace long-term memory
+        +-- DuckDB conversation memory (single-user restore)
         +-- Groq, NVIDIA NIM, or Microsoft Foundry
         +-- Olga native parsing + MarkItDown compatibility parsing
         +-- Docling/RapidOCR or optional cloud OCR for scanned PDFs

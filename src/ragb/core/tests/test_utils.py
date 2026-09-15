@@ -50,6 +50,22 @@ def test_parse_chunk_response_nofunc_calling():
         assert parsed_chunk == "next "
 
 
+def test_chunk_visible_text_reads_list_blocks_and_additional_kwargs():
+    from quivr_core.rag.utils import chunk_visible_text, message_text
+
+    list_chunk = AIMessageChunk(
+        content=[{"type": "text", "text": "Hello from a reasoning model"}]
+    )
+    assert chunk_visible_text(list_chunk) == "Hello from a reasoning model"
+    assert "Hello" in message_text(list_chunk.content)
+
+    hidden = AIMessageChunk(
+        content="", additional_kwargs={"output_text": "Visible answer"}
+    )
+    assert chunk_visible_text(hidden) == "Visible answer"
+
+
+
 def _check_rolling_msg(rol_msg: AIMessageChunk) -> bool:
     return (
         len(rol_msg.tool_calls) > 0
